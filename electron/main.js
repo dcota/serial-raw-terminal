@@ -5,6 +5,7 @@ import express from "express";
 import { Server } from "socket.io";
 import { SerialPort } from "serialport";
 import { ReadlineParser } from "@serialport/parser-readline";
+import { Menu, shell } from "electron";
 
 const DEV_URL = "http://127.0.0.1:5173/";
 const IO_PORT = 17865;
@@ -18,6 +19,54 @@ let isOpen = false;
 const ex = express();
 const httpServer = http.createServer(ex);
 const io = new Server(httpServer, { cors: { origin: "*" } });
+
+// --- menubar ---
+
+const isMac = process.platform === "darwin";
+const isDev = !!process.env.VITE_DEV;
+
+const template = [
+  // App menu (macOS)
+  ...(isMac
+    ? [
+        {
+          label: app.name,
+          submenu: [
+            { role: "about" },
+            { type: "separator" },
+            { role: "services" },
+            { type: "separator" },
+            { role: "hide" },
+            { role: "hideOthers" },
+            { role: "unhide" },
+            { type: "separator" },
+            { role: "quit" },
+          ],
+        },
+      ]
+    : []),
+
+  // File
+  {
+    label: "Opções",
+    submenu: [{ label: "Sair", role: isMac ? "close" : "quit" }],
+  },
+
+  // View
+  {
+    label: "Ver",
+    submenu: [
+      { label: "Tamanho inicial", role: "resetZoom" },
+      { label: "Zoom +", role: "zoomIn" },
+      { label: "Zoom -", role: "zoomOut" },
+      { type: "separator" },
+      { label: "Écran cheio", role: "togglefullscreen" },
+    ],
+  },
+];
+
+const menu = Menu.buildFromTemplate(template);
+Menu.setApplicationMenu(menu);
 
 async function listPorts() {
   const ports = await SerialPort.list();
@@ -71,9 +120,8 @@ async function createWindow() {
   await new Promise((r) => httpServer.listen(IO_PORT, "127.0.0.1", () => r()));
 
   win = new BrowserWindow({
-    width: 1120,
+    width: 1200,
     height: 740,
-    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(process.cwd(), "electron/preload.js"),
       contextIsolation: true,
