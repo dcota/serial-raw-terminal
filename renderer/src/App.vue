@@ -53,8 +53,6 @@
             <option v-for="b in baudRates" :key="b" :value="b">{{ b }}</option>
           </select>
         </div>
-
-        <!-- Connect / Disconnect (toggle) -->
         <!-- Connect / Disconnect (single persistent button) -->
         <div class="col-auto">
           <span
@@ -142,11 +140,9 @@
       <div class="card flex-grow-1 d-flex min-h-0">
         <!-- Header with centered controls -->
         <div class="card-header d-flex align-items-center">
-          <span>ENTRADA DE DADOS</span>
-
           <!-- Middle: controls, centered -->
           <div
-            class="flex-grow-1 d-flex justify-content-center align-items-center flex-wrap gap-3"
+            class="flex-grow-1 d-flex justify-content-left align-items-center flex-wrap gap-3"
           >
             <!-- Nº linha / Tempo / Data / Todos -->
             <div class="d-flex align-items-center gap-3">
@@ -209,7 +205,25 @@
                 >
               </div>
             </div>
-
+            <div class="d-flex align-items-center ms-2">
+              <button
+                class="btn btn-sm btn-outline-secondary btn-icon"
+                @click="decFont"
+                v-bstooltip="'Diminuir texto'"
+                aria-label="Diminuir texto"
+              >
+                <i class="bi bi-dash-lg"></i>
+              </button>
+              <span class="mx-2 small">{{ fontSize }}px</span>
+              <button
+                class="btn btn-sm btn-outline-secondary btn-icon"
+                @click="incFont"
+                v-bstooltip="'Aumentar texto'"
+                aria-label="Aumentar texto"
+              >
+                <i class="bi bi-plus-lg"></i>
+              </button>
+            </div>
             <!-- Text color picker (used in dark mode only) -->
             <div class="d-flex align-items-center">
               <label for="logColor" class="me-2">Cor do texto</label>
@@ -255,6 +269,8 @@
               backgroundColor: logBg,
               color: logFg,
               padding: '8px 10px 6px 10px',
+              fontSize: fontSize + 'px',
+              lineHeight: 1.35,
             }"
           >
             <div v-for="(line, i) in log" :key="i">{{ line }}</div>
@@ -426,7 +442,65 @@ const year = new Date().getFullYear();
 const lastSavePath = ref(""); // remember last used file
 const autoResumeSaving = ref(true); // choose default behavior
 
+const fontSize = ref(14);
+const DEFAULT_FONT = 14;
+
 // ---------- helpers ----------
+function handleWheelZoom(e) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (shouldIgnoreHotkeyTarget(e.target)) return;
+  e.preventDefault();
+  if (e.deltaY < 0) incFont();
+  else if (e.deltaY > 0) decFont();
+}
+
+function shouldIgnoreHotkeyTarget(target) {
+  if (!target) return false;
+  const tag = (target.tagName || "").toLowerCase();
+  const editable = target.isContentEditable;
+  return editable || tag === "input" || tag === "textarea" || tag === "select";
+}
+
+function handleFontHotkeys(e) {
+  // Require Ctrl/Cmd
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (shouldIgnoreHotkeyTarget(e.target)) return;
+
+  const k = e.key;
+
+  // Normalize: some keyboards send '+' only with Shift '=', some send 'Add'
+  const isPlus = k === "+" || k === "=" || k === "Add" || k === "NumpadAdd";
+  const isMinus = k === "-" || k === "Subtract" || k === "NumpadSubtract";
+  const isZero = k === "0" || k === "Numpad0";
+
+  if (isPlus) {
+    e.preventDefault();
+    incFont();
+    return;
+  }
+  if (isMinus) {
+    e.preventDefault();
+    decFont();
+    return;
+  }
+  if (isZero) {
+    e.preventDefault();
+    fontSize.value = clamp(DEFAULT_FONT, 10, 24);
+    return;
+  }
+}
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
+function incFont() {
+  fontSize.value = clamp(fontSize.value + 1, 10, 24);
+}
+
+function decFont() {
+  fontSize.value = clamp(fontSize.value - 1, 10, 24);
+}
+
 async function startSaving() {
   const res = await window.LogSaver?.start();
   if (res?.started) {
@@ -686,8 +760,13 @@ watch(connected, async () => {
     new bootstrap.Tooltip(el, { trigger: "hover" });
   }
 });
+watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
 
 onMounted(async () => {
+  const savedFs = Number(localStorage.getItem("logFontSize") || "");
+  if (!Number.isNaN(savedFs)) fontSize.value = clamp(savedFs, 10, 24);
+  window.addEventListener("keydown", handleFontHotkeys, { passive: false });
+  window.addEventListener("wheel", handleWheelZoom, { passive: false });
   // init tooltips
   await nextTick();
   if (connBtn.value) {
@@ -767,6 +846,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   rawlogEl.value?.removeEventListener("scroll", () => {});
+  window.removeEventListener("keydown", handleFontHotkeys);
+  window.removeEventListener("keydown", handleFontHotkeys);
   socket.close();
 });
 </script>
