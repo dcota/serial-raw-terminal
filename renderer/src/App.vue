@@ -1,35 +1,109 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, computed } from "vue";
+import {
+  ref,
+  computed,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+} from "vue";
 import { io } from "socket.io-client";
 
+/* -------------------- socket -------------------- */
 const socket = io("http://127.0.0.1:17865");
 
+/* -------------------- state (declare FIRST) -------------------- */
+// connection / ports
 const ports = ref([]);
 const selectedPort = ref("");
 const connected = ref(false);
 const busy = ref(false);
-const status = ref("");
+const status = ref("Desligado");
+
+// raw log + scrolling
+const log = ref([]);
+const rawlogEl = ref(null);
+const stickToBottom = ref(true);
+
+// prefix toggles
 const showLineNo = ref(false);
 const showTime = ref(false);
 const showDate = ref(false);
 const includeAll = ref(false);
+const lineNo = ref(1);
 
-// color + dark/light mode
+// theme
 const logDark = ref(true);
-const logColor = ref("#00ff66"); // default text color for dark mode
+const logColor = ref("#00ff66");
+const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
+const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
 
-const log = ref([]);
+/* -------------------- helpers -------------------- */
+function isNearBottom(el, threshold = 24) {
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
+}
+function handleScroll() {
+  const el = rawlogEl.value;
+  if (!el) return;
+  stickToBottom.value = isNearBottom(el);
+}
 
-function addLine(s) {
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function pad3(n) {
+  return String(n).padStart(3, "0");
+}
+function makePrefix() {
+  const parts = [];
+  const now = new Date();
+  if (includeAll.value || showLineNo.value) parts.push(`#${lineNo.value++}`);
+  if (includeAll.value || showTime.value) {
+    parts.push(
+      `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
+        now.getSeconds()
+      )}.${pad3(now.getMilliseconds())}`
+    );
+  }
+  if (includeAll.value || showDate.value) {
+    parts.push(
+      `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+    );
+  }
+  return parts.length ? `[${parts.join(" ")}] ` : "";
+}
+
+function addLineRaw(s) {
   const line = makePrefix() + s;
   log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
+  nextTick(() => {
+    const el = rawlogEl.value;
+    if (el && stickToBottom.value) el.scrollTop = el.scrollHeight;
+  });
 }
-
 function clearLog() {
   log.value = [];
+  lineNo.value = 1;
+  nextTick(() => {
+    if (rawlogEl.value) rawlogEl.value.scrollTop = 0;
+  });
 }
 
+/* -------------------- effects / watchers -------------------- */
+// All → uncheck individuals
+watch(includeAll, (v) => {
+  if (v) {
+    showLineNo.value = false;
+    showTime.value = false;
+    showDate.value = false;
+  }
+});
+// persist theme
+watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
+watch(logColor, (v) => localStorage.setItem("logColor", v));
+
+/* -------------------- socket commands -------------------- */
 function getPorts() {
   busy.value = true;
   socket.emit("getcoms");
@@ -46,6 +120,7 @@ function disconnect() {
   status.value = "Desligado";
 }
 
+/* -------------------- lifecycle -------------------- */
 onMounted(() => {
   const savedDark = localStorage.getItem("logDark");
   const savedColor = localStorage.getItem("logColor");
@@ -56,7 +131,8 @@ onMounted(() => {
   showTime.value = !!saved.showTime;
   showDate.value = !!saved.showDate;
   includeAll.value = !!saved.includeAll;
-  status.value = "Desligado";
+
+  // socket events
   socket.on("coms", (list) => {
     ports.value = list || [];
     if (!selectedPort.value && ports.value.length)
@@ -70,80 +146,27 @@ onMounted(() => {
   socket.on("porterror", (m) => {
     status.value = "Porta: " + (m || "");
   });
-  socket.on("data", (text) => addLine(String(text ?? "")));
-  getPorts();
+  socket.on("data", (text) => addLineRaw(String(text ?? "")));
+
+  // ask ports after socket connects (prevents race)
+  socket.on("connect", () => {
+    busy.value = true;
+    socket.emit("getcoms");
+    setTimeout(() => {
+      if ((ports.value?.length || 0) === 0) socket.emit("getcoms");
+    }, 800);
+  });
+
+  // attach scroll listener once element exists
+  nextTick(() => {
+    rawlogEl.value?.addEventListener("scroll", handleScroll, { passive: true });
+  });
 });
 
-watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
-watch(logColor, (v) => localStorage.setItem("logColor", v));
-
-watch(
-  [showLineNo, showTime, showDate, includeAll],
-  () => {
-    localStorage.setItem(
-      "rawlog_opts",
-      JSON.stringify({
-        showLineNo: showLineNo.value,
-        showTime: showTime.value,
-        showDate: showDate.value,
-        includeAll: includeAll.value,
-      })
-    );
-  },
-  { deep: true }
-);
-watch(includeAll, (v) => {
-  if (v) {
-    // uncheck individuals when All is selected
-    showLineNo.value = false;
-    showTime.value = false;
-    showDate.value = false;
-  }
+onBeforeUnmount(() => {
+  rawlogEl.value?.removeEventListener("scroll", handleScroll);
+  socket.close();
 });
-
-// computed colors
-const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
-const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
-
-onBeforeUnmount(() => socket.close());
-
-// line numbering
-const lineNo = ref(1);
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-function pad3(n) {
-  return String(n).padStart(3, "0");
-}
-
-function makePrefix() {
-  const all = includeAll.value;
-  const parts = [];
-
-  if (all || showLineNo.value) {
-    parts.push(`#${lineNo.value}`); // number first so time/date read naturally
-    lineNo.value += 1;
-  }
-
-  if (all || showTime.value) {
-    const now = new Date();
-    const t = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
-      now.getSeconds()
-    )}.${pad3(now.getMilliseconds())}`;
-    parts.push(t);
-  }
-
-  if (all || showDate.value) {
-    const now = new Date();
-    const d = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
-      now.getDate()
-    )}`;
-    parts.push(d);
-  }
-
-  return parts.length ? `[${parts.join(" ")}] ` : "";
-}
 </script>
 
 <template>
