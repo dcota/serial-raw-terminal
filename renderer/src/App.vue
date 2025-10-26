@@ -606,6 +606,25 @@ async function disconnect() {
   saving.value = false;
   savingPaused.value = false;
   savingMsg.value = "Terminado";
+  // ✅ unset all extra data options immediately
+  includeAll.value = false;
+  showLineNo.value = false;
+  showTime.value = false;
+  showDate.value = false;
+
+  // (optional) reset line counter if you want numbering to restart next time:
+  // lineNo.value = 1
+
+  // persist the state so it sticks
+  localStorage.setItem(
+    "rawlog_opts",
+    JSON.stringify({
+      showLineNo: showLineNo.value,
+      showTime: showTime.value,
+      showDate: showDate.value,
+      includeAll: includeAll.value,
+    })
+  );
   hideAllTooltips();
   await nextTick();
   initTooltips();
