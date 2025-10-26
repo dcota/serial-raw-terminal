@@ -23,7 +23,7 @@ const status = ref("Desligado");
 // raw log + scrolling
 const log = ref([]);
 const rawlogEl = ref(null);
-const stickToBottom = ref(true);
+const bottomSentinel = ref(null);
 
 // prefix toggles
 const showLineNo = ref(false);
@@ -42,10 +42,14 @@ const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
 function isNearBottom(el, threshold = 24) {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
 }
+
 function handleScroll() {
   const el = rawlogEl.value;
   if (!el) return;
-  stickToBottom.value = isNearBottom(el);
+  // you can keep a ref if you want to show a “jump to bottom” button,
+  // but you don't need it for auto-scroll anymore because we compute
+  // shouldStick right before appending.
+  // stickToBottom.value = isNearBottom(el)
 }
 
 function pad2(n) {
@@ -74,14 +78,23 @@ function makePrefix() {
 }
 
 function addLineRaw(s) {
+  const el = rawlogEl.value;
+  const shouldStick =
+    !el || el.scrollHeight <= el.clientHeight || isNearBottom(el, 24);
+
   const line = makePrefix() + s;
   log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
+
   nextTick(() => {
-    const el = rawlogEl.value;
-    if (el && stickToBottom.value) el.scrollTop = el.scrollHeight;
+    if (shouldStick && bottomSentinel.value) {
+      requestAnimationFrame(() => {
+        bottomSentinel.value.scrollIntoView({ block: "end" });
+      });
+    }
   });
 }
+
 function clearLog() {
   log.value = [];
   lineNo.value = 1;
@@ -131,6 +144,7 @@ onMounted(() => {
   showTime.value = !!saved.showTime;
   showDate.value = !!saved.showDate;
   includeAll.value = !!saved.includeAll;
+  includeAll.value = false;
 
   // socket events
   socket.on("coms", (list) => {
@@ -317,24 +331,32 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Make the body a flex column that can shrink; the log fills it -->
-        <div class="card-body p-0 d-flex flex-column min-h-0">
-          <!-- This grows to occupy the whole leftover height; scrolls on overflow -->
-          <div
-            ref="rawlog"
-            class="flex-grow-1 overflow-auto font-monospace"
-            :style="{
-              backgroundColor: logBg,
-              color: logFg,
-              padding: '8px 10px 6px 10px',
-            }"
-          >
-            <div v-for="(line, i) in log" :key="i">{{ line }}</div>
-          </div>
+        <div class="container flex-grow-1 d-flex min-h-0">
+          <div class="card flex-grow-1 d-flex min-h-0">
+            <div class="card-body p-0 d-flex flex-column min-h-0">
+              <!-- your log div lives here -->
+              <div
+                ref="rawlog"
+                class="flex-grow-1 overflow-auto font-monospace"
+                :style="{
+                  backgroundColor: logBg,
+                  color: logFg,
+                  padding: '8px 10px 6px 10px',
+                }"
+              >
+                <div v-for="(line, i) in log" :key="i">{{ line }}</div>
+                <div ref="bottomSentinel" style="height: 1px"></div>
+              </div>
 
-          <div class="d-flex justify-content-end gap-2 p-2 pt-1">
-            <button class="btn btn-sm btn-outline-secondary" @click="clearLog">
-              Limpar
-            </button>
+              <div class="d-flex justify-content-end gap-2 p-2 pt-1">
+                <button
+                  class="btn btn-sm btn-outline-secondary"
+                  @click="clearLog"
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -351,5 +373,5 @@ body,
 }
 .min-h-0 {
   min-height: 0 !important;
-} /* crucial for flex overflow areas */
+}
 </style>

@@ -133,6 +133,7 @@ async function createWindow() {
   // Try Vite dev server; if it fails, load the built file.
   try {
     await win.loadURL(DEV_URL);
+    //win.webContents.openDevTools({ mode: "detach" }); // separate window
   } catch (e) {
     const prodFile = path.join(process.cwd(), "renderer/dist/index.html");
     console.log("[electron] DEV URL not available; loading", prodFile);
