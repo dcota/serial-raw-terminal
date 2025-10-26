@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, computed } from "vue";
 import { io } from "socket.io-client";
 
 const socket = io("http://127.0.0.1:17865");
@@ -9,13 +9,23 @@ const selectedPort = ref("");
 const connected = ref(false);
 const busy = ref(false);
 const status = ref("");
+const showLineNo = ref(false);
+const showTime = ref(false);
+const showDate = ref(false);
+const includeAll = ref(false);
+
+const logColor = ref("#00ff66");
+
+const logDark = ref(true); // default dark
 
 const log = ref([]);
 
 function addLine(s) {
-  log.value.push(s);
+  const line = makePrefix() + s;
+  log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
 }
+
 function clearLog() {
   log.value = [];
 }
@@ -37,6 +47,15 @@ function disconnect() {
 }
 
 onMounted(() => {
+  const savedLogBack = localStorage.getItem("logDark");
+  if (savedLogBack !== null) logDark.value = savedLogBack === "true";
+  const colorsaved = localStorage.getItem("logColor");
+  if (colorsaved) logColor.value = colorsaved;
+  const saved = JSON.parse(localStorage.getItem("rawlog_opts") || "{}");
+  showLineNo.value = !!saved.showLineNo;
+  showTime.value = !!saved.showTime;
+  showDate.value = !!saved.showDate;
+  includeAll.value = !!saved.includeAll;
   status.value = "Desligado";
   socket.on("coms", (list) => {
     ports.value = list || [];
@@ -55,7 +74,77 @@ onMounted(() => {
   getPorts();
 });
 
+watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
+
+watch(logColor, (v) => localStorage.setItem("logColor", v));
+
+watch(
+  [showLineNo, showTime, showDate, includeAll],
+  () => {
+    localStorage.setItem(
+      "rawlog_opts",
+      JSON.stringify({
+        showLineNo: showLineNo.value,
+        showTime: showTime.value,
+        showDate: showDate.value,
+        includeAll: includeAll.value,
+      })
+    );
+  },
+  { deep: true }
+);
+watch(includeAll, (v) => {
+  if (v) {
+    // uncheck individuals when All is selected
+    showLineNo.value = false;
+    showTime.value = false;
+    showDate.value = false;
+  }
+});
+
+// computed colors (only two modes)
+const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
+const logFg = computed(() => (logDark.value ? "#fff" : "#000"));
+
 onBeforeUnmount(() => socket.close());
+
+// line numbering
+const lineNo = ref(1);
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function pad3(n) {
+  return String(n).padStart(3, "0");
+}
+
+function makePrefix() {
+  const all = includeAll.value;
+  const parts = [];
+
+  if (all || showLineNo.value) {
+    parts.push(`#${lineNo.value}`); // number first so time/date read naturally
+    lineNo.value += 1;
+  }
+
+  if (all || showTime.value) {
+    const now = new Date();
+    const t = `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
+      now.getSeconds()
+    )}.${pad3(now.getMilliseconds())}`;
+    parts.push(t);
+  }
+
+  if (all || showDate.value) {
+    const now = new Date();
+    const d = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
+      now.getDate()
+    )}`;
+    parts.push(d);
+  }
+
+  return parts.length ? `[${parts.join(" ")}] ` : "";
+}
 </script>
 
 <template>
@@ -104,6 +193,75 @@ onBeforeUnmount(() => socket.close());
       <div class="card flex-grow-1 d-flex min-h-0">
         <div class="card-header d-flex align-items-center">
           <span>ENTRADA DE DADOS</span>
+          <!-- Checkboxes -->
+          <div class="form-check form-check-inline">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="optAll"
+              v-model="includeAll"
+            />
+            <label class="form-check-label small" for="optAll">All</label>
+          </div>
+
+          <div class="form-check form-check-inline">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="optLn"
+              v-model="showLineNo"
+              :disabled="includeAll"
+            />
+            <label class="form-check-label small" for="optLn">Line #</label>
+          </div>
+
+          <div class="form-check form-check-inline">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="optTime"
+              v-model="showTime"
+              :disabled="includeAll"
+            />
+            <label class="form-check-label small" for="optTime">Time</label>
+          </div>
+
+          <div class="form-check form-check-inline">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="optDate"
+              v-model="showDate"
+              :disabled="includeAll"
+            />
+            <label class="form-check-label small" for="optDate">Date</label>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <label for="logColor" class="small text-muted me-1">Text:</label>
+            <input
+              id="logColor"
+              type="color"
+              v-model="logColor"
+              style="
+                width: 32px;
+                height: 24px;
+                padding: 0;
+                border: 0;
+                background: none;
+              "
+            />
+          </div>
+          <div class="form-check form-switch ms-2">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="logBgSwitch"
+              v-model="logDark"
+            />
+            <label class="form-check-label small" for="logBgSwitch">
+              {{ logDark ? "Dark" : "Light" }}
+            </label>
+          </div>
           <span class="small text-muted ms-auto">{{ status }}</span>
         </div>
 
@@ -111,8 +269,13 @@ onBeforeUnmount(() => socket.close());
         <div class="card-body p-0 d-flex flex-column min-h-0">
           <!-- This grows to occupy the whole leftover height; scrolls on overflow -->
           <div
-            class="flex-grow-1 overflow-auto bg-dark text-success font-monospace"
-            style="padding: 8px 10px 6px 10px"
+            ref="rawlog"
+            class="flex-grow-1 overflow-auto font-monospace"
+            :style="{
+              backgroundColor: logBg,
+              color: logFg,
+              padding: '8px 10px 6px 10px',
+            }"
           >
             <div v-for="(line, i) in log" :key="i">{{ line }}</div>
           </div>
