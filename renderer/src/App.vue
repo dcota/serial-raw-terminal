@@ -14,9 +14,9 @@ const showTime = ref(false);
 const showDate = ref(false);
 const includeAll = ref(false);
 
-const logColor = ref("#00ff66");
-
-const logDark = ref(true); // default dark
+// color + dark/light mode
+const logDark = ref(true);
+const logColor = ref("#00ff66"); // default text color for dark mode
 
 const log = ref([]);
 
@@ -47,10 +47,10 @@ function disconnect() {
 }
 
 onMounted(() => {
-  const savedLogBack = localStorage.getItem("logDark");
-  if (savedLogBack !== null) logDark.value = savedLogBack === "true";
-  const colorsaved = localStorage.getItem("logColor");
-  if (colorsaved) logColor.value = colorsaved;
+  const savedDark = localStorage.getItem("logDark");
+  const savedColor = localStorage.getItem("logColor");
+  if (savedDark !== null) logDark.value = savedDark === "true";
+  if (savedColor !== null) logColor.value = savedColor;
   const saved = JSON.parse(localStorage.getItem("rawlog_opts") || "{}");
   showLineNo.value = !!saved.showLineNo;
   showTime.value = !!saved.showTime;
@@ -75,7 +75,6 @@ onMounted(() => {
 });
 
 watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
-
 watch(logColor, (v) => localStorage.setItem("logColor", v));
 
 watch(
@@ -102,9 +101,9 @@ watch(includeAll, (v) => {
   }
 });
 
-// computed colors (only two modes)
+// computed colors
 const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
-const logFg = computed(() => (logDark.value ? "#fff" : "#000"));
+const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
 
 onBeforeUnmount(() => socket.close());
 
@@ -193,75 +192,104 @@ function makePrefix() {
       <div class="card flex-grow-1 d-flex min-h-0">
         <div class="card-header d-flex align-items-center">
           <span>ENTRADA DE DADOS</span>
-          <!-- Checkboxes -->
-          <div class="form-check form-check-inline">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="optAll"
-              v-model="includeAll"
-            />
-            <label class="form-check-label small" for="optAll">All</label>
+          <!-- Middle: controls, centered between the two spans -->
+          <div
+            class="flex-grow-1 d-flex justify-content-center align-items-center flex-wrap gap-3"
+          >
+            <!-- All / Line / Time / Date -->
+            <div class="d-flex align-items-center gap-3">
+              <div
+                class="form-check form-check-inline m-0 d-flex align-items-center"
+              >
+                <input
+                  class="form-check-input mt-0"
+                  type="checkbox"
+                  id="optLn"
+                  v-model="showLineNo"
+                  :disabled="includeAll"
+                />
+                <label class="form-check-label ms-1 mb-0" for="optLn"
+                  >Nº linha</label
+                >
+              </div>
+
+              <div
+                class="form-check form-check-inline m-0 d-flex align-items-center"
+              >
+                <input
+                  class="form-check-input mt-0"
+                  type="checkbox"
+                  id="optTime"
+                  v-model="showTime"
+                  :disabled="includeAll"
+                />
+                <label class="form-check-label ms-1 mb-0" for="optTime"
+                  >Tempo</label
+                >
+              </div>
+
+              <div
+                class="form-check form-check-inline m-0 d-flex align-items-center"
+              >
+                <input
+                  class="form-check-input mt-0"
+                  type="checkbox"
+                  id="optDate"
+                  v-model="showDate"
+                  :disabled="includeAll"
+                />
+                <label class="form-check-label ms-1 mb-0" for="optDate"
+                  >Data</label
+                >
+              </div>
+
+              <div
+                class="form-check form-check-inline m-0 d-flex align-items-center"
+              >
+                <input
+                  class="form-check-input mt-0"
+                  type="checkbox"
+                  id="optAll"
+                  v-model="includeAll"
+                />
+                <label class="form-check-label ms-1 mb-0 me-5" for="optAll"
+                  >Todos</label
+                >
+              </div>
+            </div>
+
+            <!-- Color picker (used in dark mode) -->
+            <div class="d-flex align-items-center">
+              <label for="logColor" class="me-2">Cor do texto</label>
+              <input
+                id="logColor"
+                type="color"
+                v-model="logColor"
+                :disabled="!logDark"
+                style="
+                  width: 32px;
+                  height: 24px;
+                  padding: 0;
+                  border: 0;
+                  background: none;
+                "
+              />
+            </div>
+
+            <!-- Dark/Light switch -->
+            <div class="form-check form-switch m-0">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="logBgSwitch"
+                v-model="logDark"
+              />
+              <label class="form-check-label" for="logBgSwitch">{{
+                logDark ? "Escuro" : "Claro"
+              }}</label>
+            </div>
           </div>
 
-          <div class="form-check form-check-inline">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="optLn"
-              v-model="showLineNo"
-              :disabled="includeAll"
-            />
-            <label class="form-check-label small" for="optLn">Line #</label>
-          </div>
-
-          <div class="form-check form-check-inline">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="optTime"
-              v-model="showTime"
-              :disabled="includeAll"
-            />
-            <label class="form-check-label small" for="optTime">Time</label>
-          </div>
-
-          <div class="form-check form-check-inline">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="optDate"
-              v-model="showDate"
-              :disabled="includeAll"
-            />
-            <label class="form-check-label small" for="optDate">Date</label>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <label for="logColor" class="small text-muted me-1">Text:</label>
-            <input
-              id="logColor"
-              type="color"
-              v-model="logColor"
-              style="
-                width: 32px;
-                height: 24px;
-                padding: 0;
-                border: 0;
-                background: none;
-              "
-            />
-          </div>
-          <div class="form-check form-switch ms-2">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="logBgSwitch"
-              v-model="logDark"
-            />
-            <label class="form-check-label small" for="logBgSwitch">
-              {{ logDark ? "Dark" : "Light" }}
-            </label>
-          </div>
           <span class="small text-muted ms-auto">{{ status }}</span>
         </div>
 
