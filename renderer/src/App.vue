@@ -188,7 +188,7 @@ onBeforeUnmount(() => {
   <div class="d-flex flex-column vh-100">
     <!-- Top controls (natural height) -->
     <div class="container mt-3 pt-2 ps-3 pe-3">
-      <h1 class="ms-3 mb-2">CanSat Dashboard (Raw)</h1>
+      <h1 class="ms-3 mb-2">CanSat Terminal</h1>
 
       <div class="row g-2 ms-3 align-items-end">
         <div class="col-auto">
@@ -226,14 +226,16 @@ onBeforeUnmount(() => {
 
     <!-- Log area fills ALL remaining height from the start -->
     <div class="container flex-grow-1 d-flex min-h-0 mt-5 mb-5">
+      <!-- Single card (border kept) -->
       <div class="card flex-grow-1 d-flex min-h-0">
         <div class="card-header d-flex align-items-center">
           <span>ENTRADA DE DADOS</span>
+
           <!-- Middle: controls, centered between the two spans -->
           <div
             class="flex-grow-1 d-flex justify-content-center align-items-center flex-wrap gap-3"
           >
-            <!-- All / Line / Time / Date -->
+            <!-- Nº linha / Tempo / Data / Todos -->
             <div class="d-flex align-items-center gap-3">
               <div
                 class="form-check form-check-inline m-0 d-flex align-items-center"
@@ -327,36 +329,30 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Right: status -->
           <span class="small text-muted ms-auto">{{ status }}</span>
         </div>
 
-        <!-- Make the body a flex column that can shrink; the log fills it -->
-        <div class="container flex-grow-1 d-flex min-h-0">
-          <div class="card flex-grow-1 d-flex min-h-0">
-            <div class="card-body p-0 d-flex flex-column min-h-0">
-              <!-- your log div lives here -->
-              <div
-                ref="rawlog"
-                class="flex-grow-1 overflow-auto font-monospace"
-                :style="{
-                  backgroundColor: logBg,
-                  color: logFg,
-                  padding: '8px 10px 6px 10px',
-                }"
-              >
-                <div v-for="(line, i) in log" :key="i">{{ line }}</div>
-                <div ref="bottomSentinel" style="height: 1px"></div>
-              </div>
+        <!-- Single card body (no nested card) -->
+        <div class="card-body p-0 d-flex flex-column min-h-0">
+          <!-- scrollable log fills remaining height -->
+          <div
+            ref="rawlog"
+            class="flex-grow-1 overflow-auto font-monospace"
+            :style="{
+              backgroundColor: logBg,
+              color: logFg,
+              padding: '8px 10px 6px 10px',
+            }"
+          >
+            <div v-for="(line, i) in log" :key="i">{{ line }}</div>
+            <div ref="bottomSentinel" style="height: 1px"></div>
+          </div>
 
-              <div class="d-flex justify-content-end gap-2 p-2 pt-1">
-                <button
-                  class="btn btn-sm btn-outline-secondary"
-                  @click="clearLog"
-                >
-                  Limpar
-                </button>
-              </div>
-            </div>
+          <div class="d-flex justify-content-end gap-2 p-2 pt-1">
+            <button class="btn btn-sm btn-outline-secondary" @click="clearLog">
+              Limpar
+            </button>
           </div>
         </div>
       </div>
