@@ -18,6 +18,7 @@ let parser = null;
 let isOpen = false;
 
 let quitting = false;
+let confirming = false;
 
 // --- Local Socket.IO server (serial lives here) ---
 const ex = express();
@@ -439,15 +440,23 @@ async function createWindow() {
     },
   });
 
-  win.on("close", async (e) => {
-    if (quitting) return; // already approved
-    const ok = await requestSafeClose(win);
-    if (!ok) {
-      e.preventDefault();
-      return;
+  /*win.on("close", async (e) => {
+    if (quitting) return; // already approved => allow close
+    e.preventDefault(); // stop default while we decide
+
+    if (confirming) return; // don’t stack dialogs
+    confirming = true;
+    try {
+      const ok = await requestSafeClose(win); // your confirm function
+      if (ok) {
+        quitting = true;
+        // IMPORTANT: destroy, don’t app.quit() here (avoids re-firing close)
+        win.destroy();
+      }
+    } finally {
+      confirming = false;
     }
-    quitting = true;
-  });
+  });*/
   win.on("close", (e) => {
     if (isOpen) {
       e.preventDefault();
@@ -480,22 +489,11 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-app.on("before-quit", async (e) => {
-  if (quitting) return;
-  try {
-    const win =
-      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    if (!win) {
-      quitting = true;
-      return;
-    }
-    const ok = await requestSafeClose(win);
-    if (!ok) {
-      e.preventDefault();
-      return;
-    }
-    quitting = true;
-  } catch {
-    quitting = true;
-  }
+app.on("before-quit", (e) => {
+  if (quitting) return; // already approved
+  e.preventDefault();
+  // Trigger the window close path (which shows the dialog once)
+  const w =
+    BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (w) w.close(); // will hit the handler above
 });

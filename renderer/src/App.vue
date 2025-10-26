@@ -16,7 +16,7 @@
           <button
             class="btn btn-sm btn-primary btn-icon"
             @click="getPorts"
-            :disabled="busy"
+            :disabled="busy || connected"
             data-bs-title="Obter portas"
             data-bs-toggle="tooltip"
             data-bs-trigger="hover"
