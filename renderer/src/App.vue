@@ -458,22 +458,30 @@ function isNearBottom(el, threshold = 24) {
 }
 
 function makePrefix() {
-  const parts = [];
+  const cols = [];
   const now = new Date();
-  if (includeAll.value || showLineNo.value) parts.push(`#${lineNo.value++}`);
+
+  // line number (keep the # — remove it if you want pure numeric)
+  if (includeAll.value || showLineNo.value) cols.push(String(lineNo.value++)); // no '#'
+
+  // time (HH:MM:SS.mmm)
   if (includeAll.value || showTime.value) {
-    parts.push(
+    cols.push(
       `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
         now.getSeconds()
       )}.${pad3(now.getMilliseconds())}`
     );
   }
+
+  // date (YYYY-MM-DD)
   if (includeAll.value || showDate.value) {
-    parts.push(
+    cols.push(
       `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
     );
   }
-  return parts.length ? `[${parts.join(" ")}] ` : "";
+
+  // join with ';' and terminate with '; '
+  return cols.length ? cols.join(";") + ";" : "";
 }
 
 // robust stick-to-bottom (decide before append; scroll after layout)
