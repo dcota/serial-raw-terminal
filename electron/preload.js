@@ -11,8 +11,6 @@ contextBridge.exposeInMainWorld("LogSaver", {
   onError: (cb) => ipcRenderer.on("save:error", (_e, message) => cb(message)),
 });
 
-const { contextBridge, ipcRenderer } = require("electron");
-
 contextBridge.exposeInMainWorld("AppInfo", {
   get: () => ipcRenderer.invoke("app:info"),
 });

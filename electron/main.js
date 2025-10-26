@@ -218,45 +218,92 @@ async function listPorts() {
   return ports.map((p) => p.path);
 }
 
-io.on("connection", (socket) => {
-  socket.on("getcoms", async () => {
+function attachSerialListeners(socket) {
+  if (parser) {
     try {
-      socket.emit("coms", await listPorts());
-    } catch (e) {
-      socket.emit("errors", String(e?.message || e));
+      parser.removeAllListeners();
+    } catch {}
+  }
+  parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
+  parser.on("data", (line) => socket.emit("data", line.toString()));
+  serial.on("error", (e) => socket.emit("porterror", String(e?.message || e)));
+  serial.on("close", () => {
+    isOpen = false;
+    // stop saving if active
+    if (typeof saver !== "undefined" && saver.stream && !saver.ended) {
+      try {
+        saver.stream.end();
+      } catch {}
+      saver.stream = null;
+      saver.ended = true;
     }
+    socket.emit("data", "# porta fechada");
   });
+}
 
-  socket.on("conn", async (path) => {
+io.on("connection", (socket) => {
+  socket.on("conn", async (payload) => {
     try {
-      if (isOpen && serial) {
-        try {
-          await new Promise((r) => serial.close(() => r()));
-        } catch {}
+      const portPath =
+        payload && typeof payload === "object" ? payload.port : payload;
+      const baudRate =
+        payload && typeof payload === "object" && payload.baudRate
+          ? Number(payload.baudRate)
+          : 9600;
+
+      if (!portPath) {
+        socket.emit("errors", "Nenhuma porta selecionada");
+        return;
       }
-      serial = new SerialPort({ path, baudRate: 9600 }, (err) => {
-        if (err) socket.emit("porterror", String(err?.message || err));
+
+      if (serial && isOpen) {
+        await new Promise((res) => serial.close(() => res()));
+        isOpen = false;
+      }
+
+      serial = new SerialPort({ path: portPath, baudRate }, (err) => {
+        if (err) {
+          socket.emit(
+            "errors",
+            "Erro ao abrir porta: " + String(err.message || err)
+          );
+          return;
+        }
+        isOpen = true;
+        socket.emit("data", `# conectado a ${portPath} @ ${baudRate} bps`);
+        attachSerialListeners(socket);
       });
-      parser = serial.pipe(new ReadlineParser({ delimiter: "\r\n" }));
-      parser.on("data", (line) =>
-        io.emit("data", line != null ? String(line) : "")
-      );
-      serial.on("error", (err) => socket.emit("porterror", String(err)));
-      isOpen = true;
     } catch (e) {
-      socket.emit("porterror", "Open failed: " + String(e?.message || e));
+      socket.emit("errors", "Erro na ligação: " + String(e?.message || e));
     }
   });
 
   socket.on("disconn", async () => {
     try {
-      if (isOpen && serial) await new Promise((r) => serial.close(() => r()));
-      serial = null;
-      parser = null;
-      isOpen = false;
+      if (serial && isOpen) {
+        await new Promise((res) => serial.close(() => res()));
+        isOpen = false;
+      }
+      // ⛔ also stop saving from main side
+      if (typeof saver !== "undefined" && saver.stream && !saver.ended) {
+        try {
+          saver.stream.end();
+        } catch {}
+        saver.stream = null;
+        saver.ended = true;
+      }
+      socket.emit("data", "# desligado");
     } catch (e) {
-      socket.emit("porterror", "Close failed: " + String(e?.message || e));
+      socket.emit("errors", "Erro ao desligar: " + String(e?.message || e));
     }
+  });
+
+  socket.on("getcoms", async () => {
+    const list = await SerialPort.list();
+    socket.emit(
+      "coms",
+      list.map((d) => d.path)
+    );
   });
 });
 
@@ -317,6 +364,8 @@ async function createWindow() {
   win = new BrowserWindow({
     width: 1200,
     height: 740,
+    minWidth: 1200,
+    minHeight: 740,
     title: "CANSAT TERMINAL 2025",
     webPreferences: {
       preload: path.join(process.cwd(), "electron/preload.js"),
@@ -328,7 +377,6 @@ async function createWindow() {
   let quitting = false;
   win.on("close", async (e) => {
     if (quitting) return; // already approved
-
     const ok = await requestSafeClose(win);
     if (!ok) {
       e.preventDefault();
@@ -363,9 +411,11 @@ app.whenReady().then(createWindow);
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
+
 app.on("before-quit", async (e) => {
   if (quitting) return;
   const win =
