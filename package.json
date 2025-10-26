@@ -1,0 +1,50 @@
+{
+  "name": "serial-raw-terminal",
+  "version": "1.0.0",
+  "description": "Electron desktop app: serial raw line terminal with canvas plot (offline-ready)",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n renderer,electron \"cross-env VITE_DEV=1 npm run dev -w renderer\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV=1 electron .\"",
+    "start": "electron .",
+    "build:renderer": "npm run build -w renderer",
+    "build": "npm run build:renderer && electron-builder"
+  },
+  "build": {
+    "appId": "com.yourorg.serialrawterminal",
+    "files": [
+      "electron/**/*",
+      "renderer/dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "electron": "^31.7.5",
+    "express": "^4.19.2",
+    "serialport": "^12.0.0",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^8.0.0"
+  },
+  "workspaces": [
+    "renderer"
+  ]
+}
