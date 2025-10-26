@@ -423,7 +423,22 @@ const appInfo = ref({ name: "CanSat Terminal", version: "" });
 const author = "Duarte Cota";
 const year = new Date().getFullYear();
 
+const lastSavePath = ref(""); // remember last used file
+const autoResumeSaving = ref(true); // choose default behavior
+
 // ---------- helpers ----------
+async function startSaving() {
+  const res = await window.LogSaver?.start();
+  if (res?.started) {
+    saving.value = true;
+    savingPaused.value = false;
+    savingPath.value = res.filepath || "";
+    savingMsg.value = "A guardar...";
+    lastSavePath.value = savingPath.value;
+  } else {
+    savingMsg.value = "Gravação cancelada";
+  }
+}
 function initTooltips() {
   // dispose old
   tooltipInstances.forEach((t) => {
@@ -492,7 +507,6 @@ function addLineRaw(s) {
   }
 
   const box = rawlogEl.value;
-  // decide stickiness BEFORE we add a line
   const shouldStick =
     !box ||
     box.scrollHeight <= box.clientHeight ||
@@ -504,14 +518,22 @@ function addLineRaw(s) {
 
   nextTick(() => {
     if (shouldStick && bottomSentinel.value) {
-      // after layout has settled, snap to bottom
-      requestAnimationFrame(() => {
-        bottomSentinel.value.scrollIntoView({ block: "end" });
-      });
+      requestAnimationFrame(() =>
+        bottomSentinel.value.scrollIntoView({ block: "end" })
+      );
     }
   });
 
-  // (keep your "saving" append here if you had it)
+  // 🔴 append to saver on every line
+  if (saving.value && !savingPaused.value && window.LogSaver) {
+    window.LogSaver.append(line)
+      .then((res) => {
+        if (res?.queued != null) savingQueued.value = res.queued;
+      })
+      .catch(() => {
+        savingMsg.value = "Erro ao gravar";
+      });
+  }
 }
 
 async function clearLog() {
@@ -556,6 +578,16 @@ async function connect() {
 
   connected.value = true;
   status.value = `Ligado a ${selectedPort.value} @ ${selectedBaud.value} bps`;
+  // auto-resume saving into the same file (optional)
+  if (autoResumeSaving.value && lastSavePath.value && window.LogSaver) {
+    const res = await window.LogSaver.startPath(lastSavePath.value);
+    if (res?.started) {
+      saving.value = true;
+      savingPaused.value = false;
+      savingPath.value = res.filepath;
+      savingMsg.value = "A guardar...";
+    }
+  }
   hideAllTooltips();
   await nextTick();
   initTooltips();
@@ -574,27 +606,13 @@ async function disconnect() {
   saving.value = false;
   savingPaused.value = false;
   savingMsg.value = "Terminado";
-  savingPath.value = "";
   hideAllTooltips();
   await nextTick();
   initTooltips();
 }
 
 // saving controls (preload exposes LogSaver)
-async function startSaving() {
-  if (!window.LogSaver) return;
-  const res = await window.LogSaver.start();
-  if (res?.started) {
-    saving.value = true;
-    savingPaused.value = false;
-    savingPath.value = res.filepath || "";
-    savingMsg.value = "A guardar...";
-  } else {
-    savingMsg.value = "Gravação cancelada";
-  }
-  await nextTick();
-  initTooltips();
-}
+
 async function pauseSaving() {
   if (window.LogSaver) {
     await window.LogSaver.pause();
@@ -614,12 +632,10 @@ async function resumeSaving() {
   initTooltips();
 }
 async function stopSaving() {
-  if (window.LogSaver) {
-    await window.LogSaver.stop();
-    saving.value = false;
-    savingPaused.value = false;
-    savingMsg.value = "Terminado";
-  }
+  await window.LogSaver?.stop();
+  saving.value = false;
+  savingPaused.value = false;
+  savingMsg.value = "Terminado";
   await nextTick();
   initTooltips();
 }
@@ -685,7 +701,7 @@ onMounted(async () => {
   });
   socket.on("porterror", (m) => {
     status.value = "Porta: " + (m || "");
-    // stop saving on fatal port error
+    // stop saving as the connection dropped
     if (window.LogSaver) {
       window.LogSaver.stop().catch(() => {});
     }

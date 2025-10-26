@@ -17,6 +17,8 @@ let serial = null;
 let parser = null;
 let isOpen = false;
 
+let quitting = false;
+
 // --- Local Socket.IO server (serial lives here) ---
 const ex = express();
 const httpServer = http.createServer(ex);
@@ -77,6 +79,36 @@ const saver = {
   ended: false,
 };
 
+function sendStatus(send) {
+  send("save:status", {
+    active: !!saver.stream && !saver.ended,
+    paused: saver.paused,
+    filepath: saver.filepath,
+    queued: saver.queue.length,
+  });
+}
+function drain(send) {
+  if (!saver.stream || saver.paused || saver.writing || saver.ended) return;
+  const chunk = saver.queue.shift();
+  if (chunk == null) return;
+  saver.writing = true;
+  const ok = saver.stream.write(chunk, "utf8", (err) => {
+    saver.writing = false;
+    if (err) {
+      send("save:error", String(err.message || err));
+      return;
+    }
+    if (!saver.paused && saver.queue.length) drain(send);
+    else sendStatus(send);
+  });
+  if (!ok) {
+    saver.stream.once("drain", () => {
+      saver.writing = false;
+      drain(send);
+    });
+  }
+}
+
 function saverStatus(send) {
   send("save:status", {
     active: !!saver.stream && !saver.ended,
@@ -122,19 +154,17 @@ ipcMain.handle("app:info", () => {
 
 ipcMain.handle("save:start", async (e) => {
   const win = BrowserWindow.getFocusedWindow();
-  // Confirm intent
   const ok = await dialog.showMessageBox(win, {
     type: "question",
     buttons: ["Cancelar", "Confirmar"],
     defaultId: 1,
     cancelId: 0,
     title: "Guardar registo",
-    message: "Pretende iniciar a gravação do log em ficheiro de texto?",
-    detail: "Cada linha recebida será gravada (modo de anexar).",
+    message: "Iniciar gravação do log?",
+    detail: "Cada linha recebida será anexada ao ficheiro.",
   });
   if (ok.response !== 1) return { started: false };
 
-  // Choose file (new or existing) — APPEND if exists
   const ret = await dialog.showSaveDialog(win, {
     title: "Escolher ficheiro TXT",
     defaultPath: path.join(app.getPath("documents"), "log.txt"),
@@ -142,22 +172,19 @@ ipcMain.handle("save:start", async (e) => {
   });
   if (ret.canceled || !ret.filePath) return { started: false };
 
-  // Close previous session (if any)
   try {
     if (saver.stream) saver.stream.end();
   } catch {}
-
-  // Start fresh
-  saver.stream = fs.createWriteStream(ret.filePath, { flags: "a" }); // append mode
+  saver.stream = fs.createWriteStream(ret.filePath, { flags: "a" });
   saver.filepath = ret.filePath;
   saver.paused = false;
   saver.queue = [];
   saver.writing = false;
   saver.ended = false;
 
-  saver.stream.on("error", (err) => {
-    e.sender.send("save:error", String(err.message || err));
-  });
+  saver.stream.on("error", (err) =>
+    e.sender.send("save:error", String(err.message || err))
+  );
   saver.stream.on("close", () => {
     saver.ended = true;
     e.sender.send("save:status", {
@@ -168,45 +195,68 @@ ipcMain.handle("save:start", async (e) => {
     });
   });
 
-  saverStatus(e.sender.send.bind(e.sender));
+  sendStatus(e.sender.send.bind(e.sender));
   return { started: true, filepath: saver.filepath };
 });
 
+// start with existing path (for auto-resume)
+ipcMain.handle("save:startPath", async (e, filepath) => {
+  if (!filepath) return { started: false };
+  try {
+    if (saver.stream) saver.stream.end();
+  } catch {}
+  saver.stream = fs.createWriteStream(filepath, { flags: "a" });
+  saver.filepath = filepath;
+  saver.paused = false;
+  saver.queue = [];
+  saver.writing = false;
+  saver.ended = false;
+  saver.stream.on("error", (err) =>
+    e.sender.send("save:error", String(err.message || err))
+  );
+  saver.stream.on("close", () => {
+    saver.ended = true;
+    e.sender.send("save:status", {
+      active: false,
+      paused: false,
+      filepath,
+      queued: 0,
+    });
+  });
+  sendStatus(e.sender.send.bind(e.sender));
+  return { started: true, filepath };
+});
+
 ipcMain.handle("save:append", (e, line) => {
-  if (!saver.stream || saver.ended) return { queued: 0, active: false };
+  if (!saver.stream || saver.ended) return { active: false, queued: 0 };
   saver.queue.push(line.endsWith("\n") ? line : line + "\n");
-  drainQueue(e.sender.send.bind(e.sender));
-  return { queued: saver.queue.length, active: true };
+  drain(e.sender.send.bind(e.sender));
+  return { active: true, queued: saver.queue.length };
 });
 
 ipcMain.handle("save:pause", (e) => {
   saver.paused = true;
-  saverStatus(e.sender.send.bind(e.sender));
+  sendStatus(e.sender.send.bind(e.sender));
   return { paused: true };
 });
-
 ipcMain.handle("save:resume", (e) => {
   saver.paused = false;
-  drainQueue(e.sender.send.bind(e.sender));
-  saverStatus(e.sender.send.bind(e.sender));
+  drain(e.sender.send.bind(e.sender));
+  sendStatus(e.sender.send.bind(e.sender));
   return { paused: false };
 });
-
 ipcMain.handle("save:stop", (e) => {
-  if (saver.stream && !saver.ended) {
-    try {
-      saver.stream.end();
-    } catch {}
-  }
+  try {
+    if (saver.stream && !saver.ended) saver.stream.end();
+  } catch {}
   saver.stream = null;
   saver.ended = true;
   saver.queue = [];
-  saverStatus(e.sender.send.bind(e.sender));
+  sendStatus(e.sender.send.bind(e.sender));
   return { stopped: true };
 });
-
 ipcMain.handle("save:status", (e) => {
-  saverStatus(e.sender.send.bind(e.sender));
+  sendStatus(e.sender.send.bind(e.sender));
   return { ok: true };
 });
 
@@ -229,13 +279,20 @@ function attachSerialListeners(socket) {
   serial.on("error", (e) => socket.emit("porterror", String(e?.message || e)));
   serial.on("close", () => {
     isOpen = false;
-    // stop saving if active
-    if (typeof saver !== "undefined" && saver.stream && !saver.ended) {
+    // ⛔ stop saving if active
+    if (saver?.stream && !saver.ended) {
       try {
         saver.stream.end();
       } catch {}
       saver.stream = null;
       saver.ended = true;
+      saver.queue = [];
+      socket.emit("save:status", {
+        active: false,
+        paused: false,
+        filepath: saver.filepath,
+        queued: 0,
+      });
     }
     socket.emit("data", "# porta fechada");
   });
@@ -284,13 +341,20 @@ io.on("connection", (socket) => {
         await new Promise((res) => serial.close(() => res()));
         isOpen = false;
       }
-      // ⛔ also stop saving from main side
-      if (typeof saver !== "undefined" && saver.stream && !saver.ended) {
+      // ⛔ stop saving from main side too (belt & suspenders)
+      if (saver?.stream && !saver.ended) {
         try {
           saver.stream.end();
         } catch {}
         saver.stream = null;
         saver.ended = true;
+        saver.queue = [];
+        socket.emit("save:status", {
+          active: false,
+          paused: false,
+          filepath: saver.filepath,
+          queued: 0,
+        });
       }
       socket.emit("data", "# desligado");
     } catch (e) {
@@ -374,7 +438,7 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
-  let quitting = false;
+
   win.on("close", async (e) => {
     if (quitting) return; // already approved
     const ok = await requestSafeClose(win);
@@ -418,13 +482,20 @@ app.on("activate", () => {
 
 app.on("before-quit", async (e) => {
   if (quitting) return;
-  const win =
-    BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-  if (!win) return;
-  const ok = await requestSafeClose(win);
-  if (!ok) {
-    e.preventDefault();
-    return;
+  try {
+    const win =
+      BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      quitting = true;
+      return;
+    }
+    const ok = await requestSafeClose(win);
+    if (!ok) {
+      e.preventDefault();
+      return;
+    }
+    quitting = true;
+  } catch {
+    quitting = true;
   }
-  quitting = true;
 });
