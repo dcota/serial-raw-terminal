@@ -40,7 +40,31 @@ const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
 
 const skipNext = ref(true); // skip the first incoming line
 
+// --- Saving state ---
+const saving = ref(false);
+const savingPaused = ref(false);
+const savingPath = ref("");
+const savingQueued = ref(0);
+const savingMsg = ref("");
+
+const appInfo = ref({ name: "CanSat Terminal", version: "" });
+const author = "Duarte Cota"; // <- edit as you like
+const year = new Date().getFullYear();
+
 /* -------------------- helpers -------------------- */
+function updateSavingStatus(s) {
+  if (!s) return;
+  saving.value = !!s.active;
+  savingPaused.value = !!s.paused;
+  savingPath.value = s.filepath || "";
+  savingQueued.value = Number(s.queued || 0);
+  savingMsg.value = saving.value
+    ? savingPaused.value
+      ? "Pausado"
+      : "A guardar..."
+    : "Inativo";
+}
+
 function isNearBottom(el, threshold = 24) {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
 }
@@ -92,7 +116,15 @@ function addLineRaw(s) {
   const line = makePrefix() + s;
   log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
-
+  if (saving.value && !savingPaused.value && window.LogSaver) {
+    window.LogSaver.append(line)
+      .then((res) => {
+        if (res?.queued != null) savingQueued.value = res.queued;
+      })
+      .catch(() => {
+        savingMsg.value = "Erro ao gravar";
+      });
+  }
   nextTick(() => {
     if (shouldStick && bottomSentinel.value) {
       requestAnimationFrame(() => {
@@ -140,9 +172,49 @@ function disconnect() {
   connected.value = false;
   status.value = "Desligado";
 }
-
+async function startSaving() {
+  if (!window.LogSaver) return;
+  const res = await window.LogSaver.start();
+  if (res?.started) {
+    saving.value = true;
+    savingPaused.value = false;
+    savingPath.value = res.filepath || "";
+    savingMsg.value = "A guardar...";
+  } else {
+    savingMsg.value = "Gravação cancelada";
+  }
+}
+async function pauseSaving() {
+  if (window.LogSaver) {
+    await window.LogSaver.pause();
+    savingPaused.value = true;
+    savingMsg.value = "Pausado";
+  }
+}
+async function resumeSaving() {
+  if (window.LogSaver) {
+    await window.LogSaver.resume();
+    savingPaused.value = false;
+    savingMsg.value = "A guardar...";
+  }
+}
+async function stopSaving() {
+  if (window.LogSaver) {
+    await window.LogSaver.stop();
+    saving.value = false;
+    savingPaused.value = false;
+    savingMsg.value = "Terminado";
+  }
+}
 /* -------------------- lifecycle -------------------- */
 onMounted(() => {
+  if (window.LogSaver) {
+    window.LogSaver.onStatus(updateSavingStatus);
+    window.LogSaver.onError((m) => {
+      savingMsg.value = "Erro: " + m;
+    });
+    window.LogSaver.status(); // fetch initial
+  }
   const savedDark = localStorage.getItem("logDark");
   const savedColor = localStorage.getItem("logColor");
   if (savedDark !== null) logDark.value = savedDark === "true";
@@ -153,6 +225,18 @@ onMounted(() => {
   showDate.value = !!saved.showDate;
   includeAll.value = !!saved.includeAll;
   includeAll.value = false;
+  if (window.AppInfo && typeof window.AppInfo.get === "function") {
+    window.AppInfo.get()
+      .then((info) => {
+        if (info) {
+          appInfo.value = {
+            name: info.name || appInfo.value.name,
+            version: info.version || appInfo.value.version,
+          };
+        }
+      })
+      .catch(() => {});
+  }
 
   // socket events
   socket.on("coms", (list) => {
@@ -196,14 +280,19 @@ onBeforeUnmount(() => {
   <div class="d-flex flex-column vh-100">
     <!-- Top controls (natural height) -->
     <div class="container mt-3 pt-2 ps-3 pe-3">
-      <h1 class="ms-3 mb-2">CanSat Terminal</h1>
+      <div class="d-flex align-items-center justify-content-between">
+        <h1 class="ms-3 mb-2">CanSat Terminal</h1>
+      </div>
 
+      <!--buttons-->
       <div class="row g-2 ms-3 align-items-end">
+        <!-- LEFT: ports + connect -->
         <div class="col-auto">
           <button class="btn btn-primary" @click="getPorts" :disabled="busy">
             OBTER PORTAS
           </button>
         </div>
+
         <div class="col-auto">
           <select
             class="form-select text-center"
@@ -213,6 +302,7 @@ onBeforeUnmount(() => {
             <option v-for="p in ports" :key="p" :value="p">{{ p }}</option>
           </select>
         </div>
+
         <div class="col-auto">
           <button
             class="btn btn-success"
@@ -229,15 +319,49 @@ onBeforeUnmount(() => {
             DESLIGAR
           </button>
         </div>
+
+        <!-- RIGHT: Guardar / Pausar / Retomar / Terminar -->
+        <div class="col ms-auto text-end">
+          <div class="d-inline-flex gap-2">
+            <button
+              class="btn btn-sm btn-outline-primary"
+              @click="startSaving"
+              :disabled="saving"
+            >
+              Guardar
+            </button>
+            <button
+              class="btn btn-sm btn-outline-warning"
+              v-if="saving && !savingPaused"
+              @click="pauseSaving"
+            >
+              Pausar
+            </button>
+            <button
+              class="btn btn-sm btn-outline-success"
+              v-if="saving && savingPaused"
+              @click="resumeSaving"
+            >
+              Retomar
+            </button>
+            <button
+              class="btn btn-sm btn-outline-danger"
+              v-if="saving"
+              @click="stopSaving"
+            >
+              Terminar
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Log area fills ALL remaining height from the start -->
-    <div class="container flex-grow-1 d-flex min-h-0 mt-5 mb-5">
+    <div class="container flex-grow-1 d-flex min-h-0 mt-2 mb-2">
       <!-- Single card (border kept) -->
       <div class="card flex-grow-1 d-flex min-h-0">
         <div class="card-header d-flex align-items-center">
-          <span>ENTRADA DE DADOS</span>
+          <span>LOG</span>
 
           <!-- Middle: controls, centered between the two spans -->
           <div
@@ -357,12 +481,45 @@ onBeforeUnmount(() => {
             <div ref="bottomSentinel" style="height: 1px"></div>
           </div>
 
-          <div class="d-flex justify-content-end gap-2 p-2 pt-1">
+          <div
+            class="d-flex justify-content-between align-items-center p-2 pt-1"
+          >
+            <!-- left: status text -->
+            <div
+              class="small text-muted text-truncate me-3"
+              style="max-width: 60%"
+            >
+              {{ savingPath ? savingMsg + " • " + savingPath : savingMsg }}
+            </div>
+
+            <!-- right: button -->
             <button class="btn btn-sm btn-outline-secondary" @click="clearLog">
               Limpar
             </button>
           </div>
         </div>
+      </div>
+    </div>
+    <!-- Footer -->
+    <div class="container mt-auto py-2 border-top small text-muted">
+      <div
+        class="d-flex align-items-center justify-content-between flex-wrap gap-2"
+      >
+        <!-- left: icon + name -->
+        <div class="d-flex align-items-center gap-2">
+          <img
+            src="./assets/cansat_logo.png"
+            alt=""
+            style="width: 72px; height: 72px"
+          />
+          <span>{{ appInfo.name || "CanSat Terminal" }}</span>
+        </div>
+
+        <!-- middle: version -->
+        <div class="text-nowrap">{{ appInfo.version || "ESERO Portugal" }}</div>
+
+        <!-- right: copyright -->
+        <div class="text-nowrap">&copy; {{ year }} {{ author }}</div>
       </div>
     </div>
   </div>
