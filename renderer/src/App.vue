@@ -38,6 +38,8 @@ const logColor = ref("#00ff66");
 const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
 const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
 
+const skipNext = ref(true); // skip the first incoming line
+
 /* -------------------- helpers -------------------- */
 function isNearBottom(el, threshold = 24) {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
@@ -78,6 +80,11 @@ function makePrefix() {
 }
 
 function addLineRaw(s) {
+  if (skipNext.value) {
+    // <- drop the first received line
+    skipNext.value = false;
+    return;
+  }
   const el = rawlogEl.value;
   const shouldStick =
     !el || el.scrollHeight <= el.clientHeight || isNearBottom(el, 24);
@@ -123,6 +130,7 @@ function getPorts() {
 }
 function connect() {
   if (!selectedPort.value) return;
+  skipNext.value = true;
   socket.emit("conn", selectedPort.value);
   connected.value = true;
   status.value = `Ligado a ${selectedPort.value}`;
