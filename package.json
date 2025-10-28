@@ -1,5 +1,5 @@
 {
-  "name": "serial-terminal-electron",
+  "name": "cansat-terminal-electron",
   "version": "1.0.0",
   "description": "Electron desktop app: serial raw line terminal with canvas plot (offline-ready)",
   "author": {

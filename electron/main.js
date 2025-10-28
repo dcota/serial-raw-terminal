@@ -467,7 +467,7 @@ async function createWindow() {
   // Try Vite dev server; if it fails, load the built file.
   if (isDev) {
     await win.loadURL(DEV_URL);
-    win.webContents.openDevTools({ mode: "detach" });
+    //win.webContents.openDevTools({ mode: "detach" });
     console.log("[electron] Loaded DEV URL", DEV_URL);
   } else {
     const indexHtml = path.join(
