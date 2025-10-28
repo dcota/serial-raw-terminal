@@ -1,0 +1,33 @@
+appId: pt.cansat.terminal
+productName: CanSat_Terminal
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - electron/**/*
+  - renderer/dist/**/*
+  - package.json
+
+asar: true
+asarUnpack:
+  - "**/*.node" # ensure native modules (e.g., serialport) are accessible
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  icon: build/icon.png
+  executableName: cansat-terminal-electron
+  desktop:
+    Name: CanSat Terminal
+    Comment: Serial RAW terminal
+    Icon: cansat-terminal-electron
+    Terminal: "false"
+    Type: Application
+    Categories: Utility;
+
+# pretty artifact names
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"

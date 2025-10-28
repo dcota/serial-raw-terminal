@@ -1,14 +1,21 @@
 {
-  "name": "serial-raw-terminal",
+  "name": "serial-terminal-electron",
   "version": "1.0.0",
   "description": "Electron desktop app: serial raw line terminal with canvas plot (offline-ready)",
+  "author": {
+    "name": "Duarte Cota",
+    "email": "duartenunocota@gmail.com"
+  },
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n renderer,electron \"cross-env VITE_DEV=1 npm run dev -w renderer\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV=1 electron .\"",
     "start": "electron .",
+    "build": "npm run build:renderer && electron-builder",
+    "postinstall": "electron-builder install-app-deps",
     "build:renderer": "npm run build -w renderer",
-    "build": "npm run build:renderer && electron-builder"
+    "dist:linux": "npm run build:renderer && electron-builder -c electron-builder.yml --linux --publish=never",
+    "dist:linux:rpm": "npm run build:renderer && electron-builder -c electron-builder.yml --linux AppImage deb rpm --publish=never"
   },
   "build": {
     "appId": "com.yourorg.serialrawterminal",
@@ -33,16 +40,17 @@
     }
   },
   "dependencies": {
-    "electron": "^31.7.5",
     "express": "^4.19.2",
     "serialport": "^12.0.0",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "concurrently": "^9.0.1",
+    "electron": "^31.7.5",
+    "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
     "electron-builder": "^24.13.3",
-    "wait-on": "^8.0.0"
+    "electron-rebuild": "^3.2.9",
+    "wait-on": "^8.0.5"
   },
   "workspaces": [
     "renderer"

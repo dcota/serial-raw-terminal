@@ -8,6 +8,10 @@ import { ReadlineParser } from "@serialport/parser-readline";
 import { Menu, shell } from "electron";
 import { ipcMain, dialog } from "electron";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DEV_URL = "http://127.0.0.1:5173/";
 const IO_PORT = 17865;
@@ -18,57 +22,15 @@ let parser = null;
 let isOpen = false;
 
 let quitting = false;
-let confirming = false;
+//let confirming = false;
 
 // --- Local Socket.IO server (serial lives here) ---
 const ex = express();
 const httpServer = http.createServer(ex);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
-// --- menubar ---
-
 const isMac = process.platform === "darwin";
-const isDev = !!process.env.VITE_DEV;
-
-const template = [
-  // App menu (macOS)
-  ...(isMac
-    ? [
-        {
-          label: app.name,
-          submenu: [
-            { role: "about" },
-            { type: "separator" },
-            { role: "services" },
-            { type: "separator" },
-            { role: "hide" },
-            { role: "hideOthers" },
-            { role: "unhide" },
-            { type: "separator" },
-            { role: "quit" },
-          ],
-        },
-      ]
-    : []),
-
-  // File
-  {
-    label: "Opções",
-    submenu: [{ label: "Sair", role: isMac ? "close" : "quit" }],
-  },
-
-  // View
-  {
-    label: "Ver",
-    submenu: [
-      { label: "Tamanho inicial", role: "resetZoom" },
-      { label: "Zoom +", role: "zoomIn" },
-      { label: "Zoom -", role: "zoomOut" },
-      { type: "separator" },
-      { label: "Écran cheio", role: "togglefullscreen" },
-    ],
-  },
-];
+const isDev = process.env.VITE_DEV === "1" || !app.isPackaged;
 
 // ---- Line-by-line saver (one active session) ----
 const saver = {
@@ -88,6 +50,7 @@ function sendStatus(send) {
     queued: saver.queue.length,
   });
 }
+
 function drain(send) {
   if (!saver.stream || saver.paused || saver.writing || saver.ended) return;
   const chunk = saver.queue.shift();
@@ -110,16 +73,16 @@ function drain(send) {
   }
 }
 
-function saverStatus(send) {
+/*function saverStatus(send) {
   send("save:status", {
     active: !!saver.stream && !saver.ended,
     paused: saver.paused,
     filepath: saver.filepath,
     queued: saver.queue.length,
   });
-}
+}*/
 
-function drainQueue(send) {
+/*function drainQueue(send) {
   if (!saver.stream || saver.paused || saver.writing || saver.ended) return;
   const item = saver.queue.shift();
   if (item == null) return;
@@ -143,7 +106,7 @@ function drainQueue(send) {
       drainQueue(send);
     });
   }
-}
+}*/
 
 // IPC handlers
 ipcMain.handle("app:info", () => {
@@ -200,7 +163,6 @@ ipcMain.handle("save:start", async (e) => {
   return { started: true, filepath: saver.filepath };
 });
 
-// start with existing path (for auto-resume)
 ipcMain.handle("save:startPath", async (e, filepath) => {
   if (!filepath) return { started: false };
   try {
@@ -240,12 +202,14 @@ ipcMain.handle("save:pause", (e) => {
   sendStatus(e.sender.send.bind(e.sender));
   return { paused: true };
 });
+
 ipcMain.handle("save:resume", (e) => {
   saver.paused = false;
   drain(e.sender.send.bind(e.sender));
   sendStatus(e.sender.send.bind(e.sender));
   return { paused: false };
 });
+
 ipcMain.handle("save:stop", (e) => {
   try {
     if (saver.stream && !saver.ended) saver.stream.end();
@@ -256,18 +220,16 @@ ipcMain.handle("save:stop", (e) => {
   sendStatus(e.sender.send.bind(e.sender));
   return { stopped: true };
 });
+
 ipcMain.handle("save:status", (e) => {
   sendStatus(e.sender.send.bind(e.sender));
   return { ok: true };
 });
 
-const menu = Menu.buildFromTemplate(template);
-Menu.setApplicationMenu(menu);
-
-async function listPorts() {
+/*async function listPorts() {
   const ports = await SerialPort.list();
   return ports.map((p) => p.path);
-}
+}*/
 
 function attachSerialListeners(socket) {
   if (parser) {
@@ -372,7 +334,7 @@ io.on("connection", (socket) => {
   });
 });
 
-async function requestSafeClose(win) {
+/*async function requestSafeClose(win) {
   // If nothing is active, allow immediate close
   const serialActive = !!isOpen;
   const savingActive = !!(
@@ -420,12 +382,57 @@ async function requestSafeClose(win) {
 
   // response === 2 → Forçar Saída
   return true;
-}
+}*/
 
+/*create menu template */
+const template = [
+  // App menu (macOS)
+  ...(isMac
+    ? [
+        {
+          label: app.name,
+          submenu: [
+            { role: "about" },
+            { type: "separator" },
+            { role: "services" },
+            { type: "separator" },
+            { role: "hide" },
+            { role: "hideOthers" },
+            { role: "unhide" },
+            { type: "separator" },
+            { role: "quit" },
+          ],
+        },
+      ]
+    : []),
+
+  // File
+  {
+    label: "Opções",
+    submenu: [{ label: "Sair", role: isMac ? "close" : "quit" }],
+  },
+
+  // View
+  {
+    label: "Ver",
+    submenu: [
+      { label: "Tamanho inicial", role: "resetZoom" },
+      { label: "Zoom +", role: "zoomIn" },
+      { label: "Zoom -", role: "zoomOut" },
+      { type: "separator" },
+      { label: "Écran cheio", role: "togglefullscreen" },
+    ],
+  },
+];
+
+/*create menu */
+const menu = Menu.buildFromTemplate(template);
+
+Menu.setApplicationMenu(menu);
+
+/*---- create Electron window ----*/
 async function createWindow() {
-  // Start Socket.IO backend first
   await new Promise((r) => httpServer.listen(IO_PORT, "127.0.0.1", () => r()));
-
   win = new BrowserWindow({
     width: 1200,
     height: 740,
@@ -433,30 +440,12 @@ async function createWindow() {
     minHeight: 740,
     title: "CANSAT TERMINAL 2025",
     webPreferences: {
-      preload: path.join(process.cwd(), "electron/preload.js"),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false,
     },
   });
 
-  /*win.on("close", async (e) => {
-    if (quitting) return; // already approved => allow close
-    e.preventDefault(); // stop default while we decide
-
-    if (confirming) return; // don’t stack dialogs
-    confirming = true;
-    try {
-      const ok = await requestSafeClose(win); // your confirm function
-      if (ok) {
-        quitting = true;
-        // IMPORTANT: destroy, don’t app.quit() here (avoids re-firing close)
-        win.destroy();
-      }
-    } finally {
-      confirming = false;
-    }
-  });*/
   win.on("close", (e) => {
     if (isOpen) {
       e.preventDefault();
@@ -470,17 +459,25 @@ async function createWindow() {
   });
 
   // Try Vite dev server; if it fails, load the built file.
-  try {
+  if (isDev) {
     await win.loadURL(DEV_URL);
-    //win.webContents.openDevTools({ mode: "detach" }); // separate window
-  } catch (e) {
-    const prodFile = path.join(process.cwd(), "renderer/dist/index.html");
-    console.log("[electron] DEV URL not available; loading", prodFile);
-    await win.loadFile(prodFile);
+    win.webContents.openDevTools({ mode: "detach" });
+    console.log("[electron] Loaded DEV URL", DEV_URL);
+  } else {
+    const indexHtml = path.join(
+      __dirname,
+      "..",
+      "renderer",
+      "dist",
+      "index.html"
+    );
+    await win.loadFile(indexHtml);
+    console.log("[electron] Loaded FILE", indexHtml);
   }
 }
 
 app.whenReady().then(createWindow);
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
