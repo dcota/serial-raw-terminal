@@ -16,7 +16,7 @@
           <button
             class="btn btn-sm btn-primary btn-icon"
             @click="getPorts"
-            :disabled="busy || connected"
+            :disabled="!socket || !socket.connected || busy"
             data-bs-title="Obter portas"
             data-bs-toggle="tooltip"
             data-bs-trigger="hover"
@@ -316,7 +316,7 @@
           />
           <span>{{ "CanSat Terminal" }}</span>
         </div>
-        <div class="text-nowrap">v{{ appInfo.version || "dev" }}</div>
+        <div class="text-nowrap">{{ appInfo.version || "dev" }}</div>
         <div class="text-nowrap">&copy; {{ year }} {{ author }}</div>
       </div>
     </div>
@@ -384,7 +384,8 @@ let tooltipInstances = [];
 const connBtn = ref(null);
 
 // ---------- socket ----------
-const socket = io("http://127.0.0.1:17865");
+//const socket = io("http://127.0.0.1:17865");
+const socket = ref(null);
 
 // ---------- state ----------
 const ports = ref([]);
@@ -435,7 +436,7 @@ const savingQueued = ref(0);
 const savingMsg = ref("Inativo");
 
 // footer app info
-const appInfo = ref({ name: "CanSat Terminal", version: "" });
+const appInfo = ref({ name: "CanSat Terminal", version: "1.0.0" });
 const author = "Duarte Cota";
 const year = new Date().getFullYear();
 
@@ -638,18 +639,21 @@ async function updateSavingStatus(s) {
 
 // ---------- actions ----------
 function getPorts() {
-  busy.value = true;
-  socket.emit("getcoms");
+  if (!socket.value || !socket.value.connected) {
+    status.value = "A iniciar ligação interna...";
+    return;
+  }
+  socket.value.emit("getcoms"); // <- use socket.value
 }
 
 async function connect() {
   if (!selectedPort.value) return;
   skipNext.value = true;
-  socket.emit("conn", {
+  socket.value.emit("conn", {
+    // <- use socket.value
     port: selectedPort.value,
     baudRate: Number(selectedBaud.value),
   });
-
   connected.value = true;
   status.value = `Ligado a ${selectedPort.value} @ ${selectedBaud.value} bps`;
   // auto-resume saving into the same file (optional)
@@ -668,7 +672,7 @@ async function connect() {
 }
 
 async function disconnect() {
-  socket.emit("disconn");
+  socket.value?.emit("disconn");
   connected.value = false;
   status.value = "Desligado";
   // ⛔ force-stop saving
@@ -733,6 +737,35 @@ async function stopSaving() {
   initTooltips();
 }
 
+function setupSocket(port) {
+  if (!port) return;
+  if (socket.value) return; // already connected/created
+  socket.value = io(`http://127.0.0.1:${port}`);
+
+  socket.value.on("connect", () => {
+    // now safe to request ports automatically
+    socket.value.emit("getcoms");
+  });
+
+  socket.value.on("coms", (list) => {
+    ports.value = list || [];
+    if (!selectedPort.value && ports.value.length)
+      selectedPort.value = ports.value[0];
+    busy.value = false;
+  });
+
+  socket.value.on("errors", (m) => {
+    status.value = "Erro: " + (m || "");
+    busy.value = false;
+  });
+
+  socket.value.on("porterror", (m) => {
+    status.value = "Porta: " + (m || "");
+  });
+
+  socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
+}
+
 // ---------- effects ----------
 watch(includeAll, (v) => {
   if (v) {
@@ -763,6 +796,39 @@ watch(connected, async () => {
 watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
 
 onMounted(async () => {
+  const p = await window.SIO?.getPort?.();
+  if (p) setupSocket(p);
+  window.SIO?.onPort((port) => {
+    console.log("SIO port from main:", port);
+    if (socket.value) return;
+    socket.value = io(`http://127.0.0.1:${port}`);
+
+    socket.value.on("connect", () => {
+      // now safe to request ports automatically
+      socket.value.emit("getcoms");
+    });
+
+    // reattach your existing handlers here:
+    socket.value.on("coms", (list) => {
+      ports.value = list || [];
+      if (!selectedPort.value && ports.value.length)
+        selectedPort.value = ports.value[0];
+      busy.value = false;
+    });
+    socket.value.on("errors", (m) => {
+      status.value = "Erro: " + (m || "");
+      busy.value = false;
+    });
+    socket.value.on("porterror", (m) => {
+      status.value = "Porta: " + (m || "");
+    });
+
+    socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
+
+    // kick off initial ports fetch if you did that before
+    socket.value.emit("getcoms");
+  });
+
   const savedFs = Number(localStorage.getItem("logFontSize") || "");
   if (!Number.isNaN(savedFs)) fontSize.value = clamp(savedFs, 10, 24);
   window.addEventListener("keydown", handleFontHotkeys, { passive: false });
@@ -787,7 +853,7 @@ onMounted(async () => {
   includeAll.value = false;
 
   // sockets
-  socket.on("coms", (list) => {
+  /*socket.on("coms", (list) => {
     ports.value = list || [];
     if (!selectedPort.value && ports.value.length)
       selectedPort.value = ports.value[0];
@@ -815,7 +881,7 @@ onMounted(async () => {
     setTimeout(() => {
       if ((ports.value?.length || 0) === 0) socket.emit("getcoms");
     }, 800);
-  });
+  });*/
 
   // saver callbacks
   if (window.LogSaver) {
@@ -848,7 +914,7 @@ onBeforeUnmount(() => {
   rawlogEl.value?.removeEventListener("scroll", () => {});
   window.removeEventListener("keydown", handleFontHotkeys);
   window.removeEventListener("keydown", handleFontHotkeys);
-  socket.close();
+  socket.value?.close();
 });
 </script>
 

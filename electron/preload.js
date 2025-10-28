@@ -15,3 +15,9 @@ contextBridge.exposeInMainWorld("LogSaver", {
 contextBridge.exposeInMainWorld("AppInfo", {
   get: () => ipcRenderer.invoke("app:info"),
 });
+
+// announce the dynamic Socket.IO port from main → renderer
+contextBridge.exposeInMainWorld("SIO", {
+  onPort: (cb) => ipcRenderer.on("sio:port", (_e, port) => cb(port)),
+  getPort: () => ipcRenderer.invoke("sio:getPort"),
+});
