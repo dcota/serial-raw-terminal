@@ -829,8 +829,15 @@ onMounted(async () => {
     socket.value.emit("getcoms");
   });
 
-  const savedFs = Number(localStorage.getItem("logFontSize") || "");
-  if (!Number.isNaN(savedFs)) fontSize.value = clamp(savedFs, 10, 24);
+  const savedFsRaw = localStorage.getItem("logFontSize");
+  if (savedFsRaw !== null) {
+    const v = Number(savedFsRaw);
+    if (Number.isFinite(v) && v > 0) {
+      fontSize.value = clamp(v, 10, 24);
+    }
+  } else {
+    fontSize.value = DEFAULT_FONT;
+  }
   window.addEventListener("keydown", handleFontHotkeys, { passive: false });
   window.addEventListener("wheel", handleWheelZoom, { passive: false });
   // init tooltips
