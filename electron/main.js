@@ -53,6 +53,41 @@ app.on("second-instance", () => {
   }
 });
 
+// Close serial, saver, socket server — swallow errors and complete quickly
+async function cleanup() {
+  try {
+    if (serial && isOpen) await new Promise((res) => serial.close(() => res()));
+    isOpen = false;
+  } catch {}
+  try {
+    saver?.stream?.end();
+    saver.stream = null;
+    saver.ended = true;
+    saver.queue = [];
+  } catch {}
+  try {
+    if (sioServer) await new Promise((res) => sioServer.close(() => res()));
+  } catch {}
+}
+
+function wireWindowClose(win) {
+  win.on("close", async (e) => {
+    if (quitting) return;
+    if (isOpen) {
+      e.preventDefault();
+      await dialog.showMessageBox(win, {
+        type: "info",
+        buttons: ["OK"],
+        title: "Ligação ativa",
+        message: "Desligue a ligação antes de fechar a aplicação.",
+      });
+      return;
+    }
+    // disconnected: tidy up and allow close
+    await cleanup();
+  });
+}
+
 function ensureSocketServer(win) {
   if (sio && sioPort) {
     // if already started, just re-announce the port to the renderer
@@ -158,6 +193,12 @@ function ensureSocketServer(win) {
       name: app.getName(),
       version: app.getVersion(),
     };
+  });
+
+  ipcMain.handle("app:quit", async () => {
+    quitting = true;
+    await cleanup();
+    app.quit();
   });
 
   ipcMain.handle("save:start", async (e) => {
@@ -450,16 +491,26 @@ async function createWindow() {
     },
   });
 
-  win.on("close", (e) => {
+  //wireWindowClose(win);
+
+  win.on("close", async (e) => {
+    if (quitting) return; // already quitting, allow close
+
     if (isOpen) {
       e.preventDefault();
-      dialog.showMessageBox(win, {
+      await dialog.showMessageBox(win, {
         type: "info",
         buttons: ["OK"],
+        defaultId: 0,
         title: "Ligação ativa",
         message: "Desligue a ligação antes de fechar a aplicação.",
       });
+      return;
     }
+
+    // Not connected: do a quick cleanup just in case, then allow close.
+    // (No preventDefault, so the window will close.)
+    await cleanup();
   });
 
   ensureSocketServer(win);
@@ -487,19 +538,20 @@ async function createWindow() {
 
 app.whenReady().then(createWindow);
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
-
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-app.on("before-quit", (e) => {
-  if (quitting) return; // already approved
+app.on("before-quit", () => {
+  quitting = true;
+});
+
+app.on("will-quit", async (e) => {
   e.preventDefault();
-  // Trigger the window close path (which shows the dialog once)
-  const w =
-    BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-  if (w) w.close(); // will hit the handler above
+  await cleanup();
+  app.exit(0); // hard-exit after cleanup to avoid hanging
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });

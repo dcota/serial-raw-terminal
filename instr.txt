@@ -1,2 +1,14 @@
+build dist:
+rm -rf dist
+npm run dist:linux
+
 install deb:
 sudo dpkg -i dist/CanSat_Terminal-1.0.0-linux-amd64.deb || sudo apt -f install
+
+rm -rf dist
+npm run dist:linux
+sudo apt install "./dist/CanSat_Terminal-1.0.0-linux-amd64.deb"
+
+
+
+
