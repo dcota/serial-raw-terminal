@@ -10,6 +10,8 @@ import { ipcMain, dialog } from "electron";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -296,6 +298,13 @@ function ensureSocketServer(win) {
     sendStatus(e.sender);
     return { ok: true };
   });
+
+  ipcMain.handle("beep:play", () => {
+    try {
+      shell.beep();
+    } catch {}
+    return true;
+  });
 }
 
 // ---- Line-by-line saver (one active session) ----
@@ -477,7 +486,6 @@ Menu.setApplicationMenu(menu);
 
 /*---- create Electron window ----*/
 async function createWindow() {
-  //await new Promise((r) => httpServer.listen(IO_PORT, "127.0.0.1", () => r()));
   win = new BrowserWindow({
     width: 1200,
     height: 740,
@@ -491,11 +499,8 @@ async function createWindow() {
     },
   });
 
-  //wireWindowClose(win);
-
   win.on("close", async (e) => {
-    if (quitting) return; // already quitting, allow close
-
+    if (quitting) return;
     if (isOpen) {
       e.preventDefault();
       await dialog.showMessageBox(win, {
@@ -507,9 +512,6 @@ async function createWindow() {
       });
       return;
     }
-
-    // Not connected: do a quick cleanup just in case, then allow close.
-    // (No preventDefault, so the window will close.)
     await cleanup();
   });
 
@@ -518,7 +520,7 @@ async function createWindow() {
   // Try Vite dev server; if it fails, load the built file.
   if (isDev) {
     await win.loadURL(DEV_URL);
-    win.webContents.openDevTools({ mode: "detach" });
+    //win.webContents.openDevTools({ mode: "detach" });
     console.log("[electron] Loaded DEV URL", DEV_URL);
   } else {
     const indexHtml = path.join(
@@ -549,7 +551,7 @@ app.on("before-quit", () => {
 app.on("will-quit", async (e) => {
   e.preventDefault();
   await cleanup();
-  app.exit(0); // hard-exit after cleanup to avoid hanging
+  app.exit(0);
 });
 
 app.on("window-all-closed", () => {

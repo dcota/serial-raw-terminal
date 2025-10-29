@@ -207,7 +207,7 @@
             </div>
             <div class="d-flex align-items-center ms-2">
               <button
-                class="btn btn-sm btn-outline-secondary btn-icon"
+                class="btn btn-sm btn-outline-primary btn-icon"
                 @click="decFont"
                 v-bstooltip="'Diminuir texto'"
                 aria-label="Diminuir texto"
@@ -216,7 +216,7 @@
               </button>
               <span class="mx-2 small">{{ fontSize }}px</span>
               <button
-                class="btn btn-sm btn-outline-secondary btn-icon"
+                class="btn btn-sm btn-outline-primary btn-icon"
                 @click="incFont"
                 v-bstooltip="'Aumentar texto'"
                 aria-label="Aumentar texto"
@@ -243,7 +243,7 @@
             </div>
 
             <!-- Dark/Light -->
-            <div class="form-check form-switch m-0">
+            <div class="form-check form-switch m-0 ms-2">
               <input
                 class="form-check-input"
                 type="checkbox"
@@ -252,6 +252,20 @@
               />
               <label class="form-check-label" for="logBgSwitch">{{
                 logDark ? "Escuro" : "Claro"
+              }}</label>
+            </div>
+            <!-- Beep switch -->
+            <div class="form-check form-switch m-0 ms-2">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="beepSwitch"
+                v-model="beepOn"
+                data-bs-toggle="tooltip"
+                data-bs-title="Emitir beep em cada linha"
+              />
+              <label class="form-check-label" for="beepSwitch">{{
+                beepOn ? "Beep" : "No Beep"
               }}</label>
             </div>
           </div>
@@ -288,7 +302,7 @@
               {{ savingPath ? savingMsg + " • " + savingPath : savingMsg }}
             </div>
             <button
-              class="btn btn-sm btn-outline-secondary btn-icon"
+              class="btn btn-sm btn-outline-primary btn-icon"
               @click="clearLog"
               data-bs-title="Limpar log"
               data-bs-toggle="tooltip"
@@ -393,7 +407,6 @@ const selectedPort = ref("");
 const busy = ref(false);
 const connected = ref(false);
 const status = ref("Desligado");
-
 // baud
 const baudRates = [
   "2400",
@@ -408,12 +421,10 @@ const baudRates = [
   "115200",
 ];
 const selectedBaud = ref("9600");
-
 // log + scroll
 const log = ref([]);
 const rawlogEl = ref(null);
 const bottomSentinel = ref(null);
-
 // prefix toggles
 const showLineNo = ref(false);
 const showTime = ref(false);
@@ -421,32 +432,101 @@ const showDate = ref(false);
 const includeAll = ref(false);
 const lineNo = ref(1);
 const skipNext = ref(true); // skip first line after (re)connect
-
 // theme
 const logDark = ref(true);
 const logColor = ref("#00ff66");
 const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
 const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
-
 // saving
 const saving = ref(false);
 const savingPaused = ref(false);
 const savingPath = ref("");
 const savingQueued = ref(0);
-const savingMsg = ref("Inativo");
-
+const savingMsg = ref("Sem gravação de dados");
 // footer app info
 const appInfo = ref({ name: "CanSat Terminal", version: "1.0.0" });
 const author = "Duarte Cota";
 const year = new Date().getFullYear();
-
+//others
 const lastSavePath = ref(""); // remember last used file
 const autoResumeSaving = ref(true); // choose default behavior
-
-const fontSize = ref(14);
 const DEFAULT_FONT = 14;
+const FONT_KEY = "logFontSize_v2"; // new versioned key
+const fontSize = ref(DEFAULT_FONT);
+const beepOn = ref(false);
+const lastBeepAt = ref(0);
+let audioCtx = null;
+
+// read (prefer v2; ignore bad/missing)
+const savedFsRaw = localStorage.getItem(FONT_KEY);
+if (savedFsRaw != null) {
+  const v = Number(savedFsRaw);
+  fontSize.value =
+    Number.isFinite(v) && v > 0 ? clamp(v, 10, 24) : DEFAULT_FONT;
+} else {
+}
 
 // ---------- helpers ----------
+function getAudioCtx() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) audioCtx = new Ctx();
+  }
+  return audioCtx;
+}
+
+// Try to unlock / resume the AudioContext after a user gesture
+async function unlockAudio() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    if (ctx.state !== "running") await ctx.resume();
+  } catch {}
+}
+
+// Attach one-time listeners to unlock on first interaction
+function initAudioUnlockOnce() {
+  const once = async () => {
+    await unlockAudio();
+    window.removeEventListener("pointerdown", once);
+    window.removeEventListener("keydown", once);
+  };
+  window.addEventListener("pointerdown", once, { once: true });
+  window.addEventListener("keydown", once, { once: true });
+}
+
+// Web-Audio fallback beep using the unlocked context
+function webBeep(durationMs = 40, freq = 880, gainVal = 0.05) {
+  const ctx = getAudioCtx();
+  if (!ctx || ctx.state !== "running") return; // can't play yet
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    gain.gain.value = gainVal;
+    osc.connect(gain).connect(ctx.destination);
+    const t0 = ctx.currentTime;
+    osc.start(t0);
+    osc.stop(t0 + durationMs / 1000);
+  } catch {}
+}
+
+async function playBeep() {
+  const now = Date.now();
+  if (now - lastBeepAt.value < 35) return; // rate-limit
+  lastBeepAt.value = now;
+
+  // 1) Try system beep
+  try {
+    await window.Beep?.play();
+  } catch {}
+
+  // 2) Ensure audio is unlocked, then Web-Audio fallback
+  await unlockAudio();
+  webBeep();
+}
+
 function handleWheelZoom(e) {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (shouldIgnoreHotkeyTarget(e.target)) return;
@@ -490,6 +570,7 @@ function handleFontHotkeys(e) {
     return;
   }
 }
+
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
@@ -543,9 +624,6 @@ function pad2(n) {
 function pad3(n) {
   return String(n).padStart(3, "0");
 }
-function isNearBottom(el, threshold = 24) {
-  return el.scrollHeight - el.clientHeight - el.scrollTop <= threshold;
-}
 
 function makePrefix() {
   const cols = [];
@@ -574,7 +652,6 @@ function makePrefix() {
   return cols.length ? cols.join(";") + ";" : "";
 }
 
-// robust stick-to-bottom (decide before append; scroll after layout)
 function addLineRaw(s) {
   if (skipNext.value) {
     skipNext.value = false;
@@ -590,6 +667,7 @@ function addLineRaw(s) {
   const line = makePrefix() + s;
   log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
+  if (beepOn.value) playBeep();
 
   nextTick(() => {
     if (shouldStick && bottomSentinel.value) {
@@ -634,7 +712,7 @@ async function updateSavingStatus(s) {
     ? savingPaused.value
       ? "Pausado"
       : "A guardar..."
-    : "Inativo";
+    : "Sem gravação de dados";
 }
 
 // ---------- actions ----------
@@ -708,8 +786,6 @@ async function disconnect() {
   initTooltips();
 }
 
-// saving controls (preload exposes LogSaver)
-
 async function pauseSaving() {
   if (window.LogSaver) {
     await window.LogSaver.pause();
@@ -766,7 +842,11 @@ function setupSocket(port) {
   socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
 }
 
-// ---------- effects ----------
+// ---------- watchers----------
+watch(fontSize, (v) => {
+  localStorage.setItem(FONT_KEY, String(clamp(v, 10, 24)));
+});
+
 watch(includeAll, (v) => {
   if (v) {
     showLineNo.value = false;
@@ -774,9 +854,13 @@ watch(includeAll, (v) => {
     showDate.value = false;
   }
 });
+
 watch(selectedBaud, (v) => localStorage.setItem("baudRate", v));
+
 watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
+
 watch(logColor, (v) => localStorage.setItem("logColor", v));
+
 watch(connected, async () => {
   await nextTick();
   const el = connBtn.value;
@@ -793,8 +877,15 @@ watch(connected, async () => {
     new bootstrap.Tooltip(el, { trigger: "hover" });
   }
 });
+
 watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
 
+watch(beepOn, async (v) => {
+  localStorage.setItem("beepOn", String(v));
+  if (v) await unlockAudio(); // flipping on is a good moment to unlock
+});
+
+//init
 onMounted(async () => {
   const p = await window.SIO?.getPort?.();
   if (p) setupSocket(p);
@@ -827,6 +918,9 @@ onMounted(async () => {
 
     // kick off initial ports fetch if you did that before
     socket.value.emit("getcoms");
+
+    //const savedBeep = localStorage.getItem("beepOn");
+    //if (savedBeep != null) beepOn.value = savedBeep === "true";
   });
 
   const savedFsRaw = localStorage.getItem("logFontSize");
@@ -859,37 +953,6 @@ onMounted(async () => {
   // never auto-check "Todos" on startup
   includeAll.value = false;
 
-  // sockets
-  /*socket.on("coms", (list) => {
-    ports.value = list || [];
-    if (!selectedPort.value && ports.value.length)
-      selectedPort.value = ports.value[0];
-    busy.value = false;
-  });
-  socket.on("errors", (m) => {
-    status.value = "Erro: " + (m || "");
-    busy.value = false;
-  });
-  socket.on("porterror", (m) => {
-    status.value = "Porta: " + (m || "");
-    // stop saving as the connection dropped
-    if (window.LogSaver) {
-      window.LogSaver.stop().catch(() => {});
-    }
-    saving.value = false;
-    savingPaused.value = false;
-    savingMsg.value = "Terminado";
-  });
-  socket.on("data", (text) => addLineRaw(String(text ?? "")));
-
-  socket.on("connect", () => {
-    busy.value = true;
-    socket.emit("getcoms");
-    setTimeout(() => {
-      if ((ports.value?.length || 0) === 0) socket.emit("getcoms");
-    }, 800);
-  });*/
-
   // saver callbacks
   if (window.LogSaver) {
     window.LogSaver.onStatus(updateSavingStatus);
@@ -911,6 +974,16 @@ onMounted(async () => {
     } catch {}
   }
 
+  // read saved
+  const savedBeep = localStorage.getItem("beepOn");
+  if (savedBeep != null) beepOn.value = savedBeep === "true";
+
+  // prepare unlock on first gesture
+  initAudioUnlockOnce();
+
+  // also try to unlock when window re-focuses
+  window.addEventListener("focus", unlockAudio);
+
   // scroll listener (optional UI like "jump to bottom"); core stickiness is handled per-append
   nextTick(() => {
     rawlogEl.value?.addEventListener("scroll", () => {}, { passive: true });
@@ -922,10 +995,25 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleFontHotkeys);
   window.removeEventListener("keydown", handleFontHotkeys);
   socket.value?.close();
+  window.removeEventListener("focus", unlockAudio);
 });
 </script>
 
 <style>
+.form-check-input:not(:checked) {
+  background-color: #e9ecef; /* light gray background */
+  border-color: #0d6efd; /* Bootstrap primary color */
+}
+
+.form-switch .form-check-input:not(:checked) {
+  background-color: #f0f0f0;
+  border-color: #0d6efd; /* Bootstrap primary color */
+}
+
+.form-select {
+  border-color: #0d6efd !important; /* Bootstrap primary color */
+}
+
 /* allow scroll child to size correctly inside nested flex */
 .min-h-0 {
   min-height: 0 !important;

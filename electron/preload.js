@@ -25,3 +25,7 @@ contextBridge.exposeInMainWorld("SIO", {
 contextBridge.exposeInMainWorld("AppControl", {
   quit: () => ipcRenderer.invoke("app:quit"),
 });
+
+contextBridge.exposeInMainWorld("Beep", {
+  play: () => ipcRenderer.invoke("beep:play"),
+});
