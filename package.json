@@ -15,7 +15,9 @@
     "postinstall": "electron-builder install-app-deps",
     "build:renderer": "npm run build -w renderer",
     "dist:linux": "npm run build:renderer && electron-builder -c electron-builder.yml --linux --publish=never",
-    "dist:linux:rpm": "npm run build:renderer && electron-builder -c electron-builder.yml --linux AppImage deb rpm --publish=never"
+    "dist:linux:rpm": "npm run build:renderer && electron-builder -c electron-builder.yml --linux AppImage deb rpm --publish=never",
+    "dist:win": "npm run build:renderer && electron-builder -c electron-builder.yml --win --x64 --publish=never",
+    "dist:win:ia32": "npm run build:renderer && electron-builder -c electron-builder.yml --win --ia32 --publish=never"
   },
   "build": {
     "appId": "com.yourorg.serialrawterminal",

@@ -31,3 +31,17 @@ linux:
 
 # pretty artifact names
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+win:
+  target:
+    - nsis # installer (recommended)
+    - portable # optional single EXE (no installer)
+  icon: build/win/cansat.ico # provide a proper .ico (see step 3)
+  artifactName: "CanSat_Terminal-${version}-win-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
