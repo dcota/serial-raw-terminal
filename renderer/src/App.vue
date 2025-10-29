@@ -243,7 +243,7 @@
             </div>
 
             <!-- Dark/Light -->
-            <div class="form-check form-switch m-0 ms-2">
+            <div class="form-check form-switch">
               <input
                 class="form-check-input"
                 type="checkbox"
@@ -255,7 +255,7 @@
               }}</label>
             </div>
             <!-- Beep switch -->
-            <div class="form-check form-switch m-0 ms-2">
+            <div class="form-check form-switch">
               <input
                 class="form-check-input"
                 type="checkbox"
@@ -265,7 +265,7 @@
                 data-bs-title="Emitir beep em cada linha"
               />
               <label class="form-check-label" for="beepSwitch">{{
-                beepOn ? "Beep" : "No Beep"
+                beepOn ? "Beep on" : "Beep off"
               }}</label>
             </div>
           </div>
