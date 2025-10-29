@@ -1,13 +1,21 @@
-build dist:
-rm -rf dist
-npm run dist:linux
-
-install deb:
-sudo dpkg -i dist/CanSat_Terminal-1.0.0-linux-amd64.deb || sudo apt -f install
-
+build and install deb:
 rm -rf dist
 npm run dist:linux
 sudo apt install "./dist/CanSat_Terminal-1.0.0-linux-amd64.deb"
+
+uninstall:
+sudo apt remove cansat-terminal-electron
+
+add user to dialout (access to serial ports):
+sudo usermod -aG dialout $USER
+
+CanSat Terminal (v1.0.1)
+------------------------
+Usage:
+  1. sudo apt install ./CanSat_Terminal-1.0.1-linux-amd64.deb
+  2. Launch from "Applications → CanSat Terminal" or run `cansat-terminal-electron`
+
+
 
 
 

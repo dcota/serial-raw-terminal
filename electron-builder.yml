@@ -19,7 +19,7 @@ linux:
     - AppImage
     - deb
   category: Utility
-  icon: build/icon.png
+  icon: build/icons
   executableName: cansat-terminal-electron
   desktop:
     Name: CanSat Terminal
