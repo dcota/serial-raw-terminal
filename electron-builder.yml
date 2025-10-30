@@ -29,15 +29,26 @@ linux:
     Type: Application
     Categories: Utility;
 
-# pretty artifact names
-artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+appImage:
+  artifactName: CanSat_Terminal-${version}-linux-${arch}.AppImage
+
+deb:
+  artifactName: CanSat_Terminal-${version}-linux-${arch}.deb
 
 win:
+
+  icon: build/win/cansat.ico
   target:
-    - nsis # installer (recommended)
-    - portable # optional single EXE (no installer)
-  icon: build/win/cansat.ico # provide a proper .ico (see step 3)
-  artifactName: "CanSat_Terminal-${version}-win-${arch}.${ext}"
+    # normal installer
+    - target: nsis
+      arch:
+        - x64
+    # zero-install exe
+    - target: portable
+      arch:
+        - x64
+  
+artifactName: "CanSat_Terminal-${version}-win-${arch}.${ext}"
 
 nsis:
   oneClick: false
@@ -45,3 +56,6 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+
+portable:
+  artifactName: CanSat_Terminal-${version}-win-${arch}.portable.exe
