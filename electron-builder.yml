@@ -59,3 +59,13 @@ nsis:
 
 portable:
   artifactName: CanSat_Terminal-${version}-win-${arch}.portable.exe
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.utilities
+  icon: build/mac/cansat.icns
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  artifactName: CanSat_Terminal-${version}-${os}-${arch}.${ext}
