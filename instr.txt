@@ -17,6 +17,9 @@ Usage:
 
 
 
-
+ls -l /dev/serial/by-id
+sudo lsof /dev/$TTY 2>/dev/null
+journalctl -k -n 200 | egrep -i 'tty|usbserial|cp210|ch34|ftdi|acm'
+lsusb
 
 

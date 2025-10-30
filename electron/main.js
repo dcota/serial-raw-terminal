@@ -9,6 +9,54 @@ import { Menu, shell } from "electron";
 import { ipcMain, dialog } from "electron";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { Transform } from "node:stream";
+
+class NormalizeNewlines extends Transform {
+  _transform(chunk, enc, cb) {
+    const out = chunk
+      .toString("utf8")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    this.push(Buffer.from(out, "utf8"));
+    cb();
+  }
+}
+
+class IdleLine extends Transform {
+  constructor(timeoutMs = 100) {
+    super();
+    this.buf = "";
+    this.timeoutMs = timeoutMs;
+    this.timer = null;
+  }
+  _bumpTimer() {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.buf.length === 0) return;
+    this.timer = setTimeout(() => {
+      if (this.buf.length) {
+        this.push(this.buf);
+        this.buf = "";
+      }
+      this.timer = null;
+    }, this.timeoutMs);
+  }
+  _transform(chunk, enc, cb) {
+    this.buf += chunk.toString("utf8");
+    // emit full lines first
+    const parts = this.buf.split("\n");
+    this.buf = parts.pop(); // remainder (no trailing \n)
+    for (const p of parts) this.push(p);
+    // if remainder exists, arm idle flush
+    this._bumpTimer();
+    cb();
+  }
+  _flush(cb) {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.buf.length) this.push(this.buf);
+    this.buf = "";
+    cb();
+  }
+}
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
@@ -40,6 +88,9 @@ const isDev = process.env.VITE_DEV === "1" || !app.isPackaged;
 let sio = null;
 let sioServer = null;
 let sioPort = null;
+
+let _lineBuf = "";
+let _idleT = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -105,12 +156,10 @@ function ensureSocketServer(win) {
   sio.on("connection", (socket) => {
     socket.on("conn", async (payload) => {
       try {
-        const portPath =
-          payload && typeof payload === "object" ? payload.port : payload;
+        const isObj = payload && typeof payload === "object";
+        const portPath = isObj ? payload.port : payload;
         const baudRate =
-          payload && typeof payload === "object" && payload.baudRate
-            ? Number(payload.baudRate)
-            : 9600;
+          isObj && payload.baudRate ? Number(payload.baudRate) : 9600;
 
         if (!portPath) {
           socket.emit("errors", "Nenhuma porta selecionada");
@@ -122,18 +171,54 @@ function ensureSocketServer(win) {
           isOpen = false;
         }
 
-        serial = new SerialPort({ path: portPath, baudRate }, (err) => {
-          if (err) {
-            socket.emit(
-              "errors",
-              "Erro ao abrir porta: " + String(err.message || err)
-            );
-            return;
+        // Allow optional overrides but use safe defaults (8N1, no flow control)
+        const portOpts = {
+          path: portPath,
+          baudRate,
+          dataBits: Number(
+            isObj && payload.dataBits != null ? payload.dataBits : 8
+          ),
+          stopBits: Number(
+            isObj && payload.stopBits != null ? payload.stopBits : 1
+          ),
+          parity: isObj && payload.parity ? String(payload.parity) : "none",
+          rtscts: !!(isObj && payload.rtscts), // default off
+          xon: !!(isObj && payload.xon), // default off
+          xoff: !!(isObj && payload.xoff), // default off
+          xany: !!(isObj && payload.xany), // default off
+        };
+
+        serial = new SerialPort(
+          {
+            path: portPath,
+            baudRate,
+            dataBits: 8,
+            stopBits: 1,
+            parity: "none",
+            rtscts: false, // no HW flow control
+            xon: false, // no SW flow control
+            xoff: false,
+            xany: false,
+          },
+          (err) => {
+            if (err) {
+              socket.emit(
+                "errors",
+                "Erro ao abrir porta: " + String(err.message || err)
+              );
+              return;
+            }
+            isOpen = true;
+
+            // >>> KEY FIX: mimic the Python test that worked
+            try {
+              serial.set({ dtr: false, rts: false });
+            } catch {}
+
+            socket.emit("data", `# conectado a ${portPath} @ ${baudRate} bps`);
+            attachSerialListeners(socket);
           }
-          isOpen = true;
-          socket.emit("data", `# conectado a ${portPath} @ ${baudRate} bps`);
-          attachSerialListeners(socket);
-        });
+        );
       } catch (e) {
         socket.emit("errors", "Erro na ligação: " + String(e?.message || e));
       }
@@ -359,17 +444,63 @@ function drain(winOrSender) {
 }*/
 
 function attachSerialListeners(socket) {
-  if (parser) {
-    try {
-      parser.removeAllListeners();
-    } catch {}
-  }
-  parser = serial.pipe(new ReadlineParser({ delimiter: "\n" }));
-  parser.on("data", (line) => socket.emit("data", line.toString()));
+  if (!serial) return;
+
+  try {
+    if (parser) {
+      try {
+        parser.removeAllListeners();
+      } catch {}
+      try {
+        serial.unpipe?.(parser);
+      } catch {}
+      parser = null;
+    }
+    serial.removeAllListeners("data");
+    serial.removeAllListeners("error");
+    serial.removeAllListeners("close");
+  } catch {}
+
+  const IDLE_MS = 150;
+
+  const flushIdle = () => {
+    if (_idleT) clearTimeout(_idleT);
+    if (_lineBuf.length === 0) return; // nothing to flush
+    _idleT = setTimeout(() => {
+      const out = _lineBuf.trimEnd(); // drop trailing \n/\r and spaces
+      if (out.length) socket.emit("data", out);
+      _lineBuf = "";
+      _idleT = null;
+    }, IDLE_MS);
+  };
+
+  serial.on("data", (buf) => {
+    const s = buf.toString("utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    _lineBuf += s;
+
+    const parts = _lineBuf.split("\n");
+    _lineBuf = parts.pop() ?? "";
+
+    for (const line of parts) {
+      const out = line.trimEnd();
+      if (out.length) socket.emit("data", out); // <-- skip empty
+    }
+
+    if (_lineBuf.length) flushIdle();
+  });
+
   serial.on("error", (e) => socket.emit("porterror", String(e?.message || e)));
+
   serial.on("close", () => {
     isOpen = false;
-    // ⛔ stop saving if active
+    if (_idleT) {
+      clearTimeout(_idleT);
+      _idleT = null;
+    }
+    const out = _lineBuf.trimEnd();
+    if (out.length) socket.emit("data", out);
+    _lineBuf = "";
+
     if (saver?.stream && !saver.ended) {
       try {
         saver.stream.end();

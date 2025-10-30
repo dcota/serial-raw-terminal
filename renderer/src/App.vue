@@ -16,7 +16,7 @@
           <button
             class="btn btn-sm btn-primary btn-icon"
             @click="getPorts"
-            :disabled="!socket || !socket.connected || busy"
+            :disabled="!socket || !socket.connected || busy || connected"
             data-bs-title="Obter portas"
             data-bs-toggle="tooltip"
             data-bs-trigger="hover"
@@ -35,6 +35,7 @@
             data-bs-title="Selecione uma porta"
             data-bs-toggle="tooltip"
             data-bs-trigger="hover"
+            :disabled="connected"
           >
             <option v-for="p in ports" :key="p" :value="p">{{ p }}</option>
           </select>
@@ -49,6 +50,7 @@
             data-bs-title="Baud rate"
             data-bs-toggle="tooltip"
             data-bs-trigger="hover"
+            :disabled="connected"
           >
             <option v-for="b in baudRates" :key="b" :value="b">{{ b }}</option>
           </select>
@@ -79,56 +81,72 @@
         <div class="col ms-auto text-end">
           <div class="d-inline-flex gap-2">
             <!-- Guardar -->
-            <button
-              class="btn btn-sm btn-outline-primary btn-icon"
-              @click="startSaving"
-              :disabled="saving"
-              data-bs-title="Guardar"
+            <span
+              class="d-inline-block"
               data-bs-toggle="tooltip"
               data-bs-trigger="hover"
+              :data-bs-title="saving ? 'Já a gravar' : 'Guardar'"
             >
-              <i class="bi bi-floppy"></i>
-              <span class="visually-hidden">Guardar</span>
-            </button>
+              <button
+                class="btn btn-sm btn-outline-primary btn-icon"
+                @click="startSaving"
+                :disabled="saving"
+              >
+                <i class="bi bi-floppy"></i>
+                <span class="visually-hidden">Guardar</span>
+              </button>
+            </span>
 
             <!-- Pausar -->
-            <button
-              class="btn btn-sm btn-outline-warning btn-icon"
+            <span
               v-if="saving && !savingPaused"
-              @click="pauseSaving"
-              data-bs-title="Pausar"
+              class="d-inline-block"
               data-bs-toggle="tooltip"
               data-bs-trigger="hover"
+              data-bs-title="Pausar"
             >
-              <i class="bi bi-pause-circle"></i>
-              <span class="visually-hidden">Pausar</span>
-            </button>
+              <button
+                class="btn btn-sm btn-outline-warning btn-icon"
+                @click="pauseSaving"
+              >
+                <i class="bi bi-pause-circle"></i>
+                <span class="visually-hidden">Pausar</span>
+              </button>
+            </span>
 
             <!-- Retomar -->
-            <button
-              class="btn btn-sm btn-outline-success btn-icon"
+            <span
               v-if="saving && savingPaused"
-              @click="resumeSaving"
-              data-bs-title="Retomar"
+              class="d-inline-block"
               data-bs-toggle="tooltip"
               data-bs-trigger="hover"
+              data-bs-title="Retomar"
             >
-              <i class="bi bi-play-circle"></i>
-              <span class="visually-hidden">Retomar</span>
-            </button>
+              <button
+                class="btn btn-sm btn-outline-success btn-icon"
+                @click="resumeSaving"
+              >
+                <i class="bi bi-play-circle"></i>
+                <span class="visually-hidden">Retomar</span>
+              </button>
+            </span>
 
             <!-- Terminar -->
-            <button
-              class="btn btn-sm btn-outline-danger btn-icon"
+            <span
               v-if="saving"
-              @click="stopSaving"
-              data-bs-title="Terminar"
+              class="d-inline-block"
               data-bs-toggle="tooltip"
               data-bs-trigger="hover"
+              data-bs-title="Terminar"
             >
-              <i class="bi bi-stop-circle"></i>
-              <span class="visually-hidden">Terminar</span>
-            </button>
+              <button
+                class="btn btn-sm btn-outline-danger btn-icon"
+                @click="stopSaving"
+              >
+                <i class="bi bi-stop-circle"></i>
+                <span class="visually-hidden">Terminar</span>
+              </button>
+            </span>
           </div>
         </div>
       </div>
@@ -658,15 +676,24 @@ function addLineRaw(s) {
     return;
   }
 
+  // coerce & ignore empty/whitespace-only lines
+  const str = typeof s === "string" ? s : String(s ?? "");
+  if (!str.trim()) return;
+
+  // tidy only the end (remove trailing \r/\n/spaces), keep inner spacing
+  const cleaned = str.trimEnd();
+
   const box = rawlogEl.value;
   const shouldStick =
     !box ||
     box.scrollHeight <= box.clientHeight ||
     box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
 
-  const line = makePrefix() + s;
+  const line = makePrefix() + cleaned;
+
   log.value.push(line);
   if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
+
   if (beepOn.value) playBeep();
 
   nextTick(() => {
@@ -677,7 +704,7 @@ function addLineRaw(s) {
     }
   });
 
-  // 🔴 append to saver on every line
+  // append to saver only for non-empty lines
   if (saving.value && !savingPaused.value && window.LogSaver) {
     window.LogSaver.append(line)
       .then((res) => {
@@ -883,6 +910,11 @@ watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
 watch(beepOn, async (v) => {
   localStorage.setItem("beepOn", String(v));
   if (v) await unlockAudio(); // flipping on is a good moment to unlock
+});
+
+watch([saving, savingPaused], async () => {
+  await nextTick();
+  initTooltips();
 });
 
 //init
