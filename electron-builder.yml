@@ -68,4 +68,5 @@ mac:
   icon: build/mac/cansat.icns
   hardenedRuntime: false
   gatekeeperAssess: false
-  artifactName: CanSat_Terminal-${version}-${os}-${arch}.${ext}
+
+artifactName: CanSat_Terminal-${version}-${os}-${arch}.${ext}
