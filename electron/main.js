@@ -519,56 +519,6 @@ function attachSerialListeners(socket) {
   });
 }
 
-/*async function requestSafeClose(win) {
-  // If nothing is active, allow immediate close
-  const serialActive = !!isOpen;
-  const savingActive = !!(
-    typeof saver !== "undefined" &&
-    saver.stream &&
-    !saver.ended
-  );
-
-  if (!serialActive && !savingActive) return true;
-
-  const parts = [];
-  if (serialActive) parts.push("ligação série ativa");
-  if (savingActive) parts.push("gravação em curso");
-
-  const detail = `Existe ${parts.join(" e ")}. Pretende sair?`;
-  const { response } = await dialog.showMessageBox(win, {
-    type: "warning",
-    buttons: ["Cancelar", "Desligar/Terminar e Sair", "Forçar Saída"],
-    defaultId: 0,
-    cancelId: 0,
-    title: "Sair da aplicação",
-    message: "Operação em curso",
-    detail,
-  });
-
-  if (response === 0) return false; // Cancel
-
-  if (response === 1) {
-    // Graceful: close serial and stop saving first
-    try {
-      if (serialActive && serial) {
-        await new Promise((resolve) => serial.close(() => resolve()));
-      }
-      if (savingActive && saver?.stream && !saver.ended) {
-        try {
-          saver.stream.end();
-        } catch {}
-        saver.ended = true;
-      }
-    } catch (e) {
-      // ignore cleanup errors; still allow quit
-    }
-    return true;
-  }
-
-  // response === 2 → Forçar Saída
-  return true;
-}*/
-
 /*create menu template */
 const template = [
   // App menu (macOS)
@@ -618,9 +568,9 @@ Menu.setApplicationMenu(menu);
 /*---- create Electron window ----*/
 async function createWindow() {
   win = new BrowserWindow({
-    width: 1200,
+    width: 1400,
     height: 740,
-    minWidth: 1200,
+    minWidth: 1400,
     minHeight: 740,
     title: "CANSAT TERMINAL 2025",
     webPreferences: {
