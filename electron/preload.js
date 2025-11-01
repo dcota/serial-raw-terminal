@@ -27,5 +27,7 @@ contextBridge.exposeInMainWorld("AppControl", {
 });
 
 contextBridge.exposeInMainWorld("Beep", {
-  play: () => ipcRenderer.invoke("beep:play"),
+ play: () => ipcRenderer.invoke("beep:play"),
+  // NEW: main tells us "do HTML beep instead"
+  onHtml5: (cb) => ipcRenderer.on("beep:html5", cb),
 });

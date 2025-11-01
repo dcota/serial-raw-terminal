@@ -29,26 +29,17 @@ linux:
     Type: Application
     Categories: Utility;
 
-appImage:
-  artifactName: CanSat_Terminal-${version}-linux-${arch}.AppImage
-
-deb:
-  artifactName: CanSat_Terminal-${version}-linux-${arch}.deb
-
 win:
-
-  icon: build/win/cansat.ico
+  # build BOTH the installer and the portable exe
   target:
-    # normal installer
     - target: nsis
       arch:
         - x64
-    # zero-install exe
     - target: portable
       arch:
         - x64
-  
-artifactName: "CanSat_Terminal-${version}-win-${arch}.${ext}"
+  # this is the *general* Windows artifact name (installer, dir, etc.)
+  artifactName: "CanSat_Terminal-${version}-win-${arch}.${ext}"
 
 nsis:
   oneClick: false
@@ -57,8 +48,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
 
+# this customizes JUST the portable target
 portable:
-  artifactName: CanSat_Terminal-${version}-win-${arch}.portable.exe
+  artifactName: "CanSat_Terminal-${version}-win-${arch}.portable.exe"
 
 mac:
   target:
@@ -68,5 +60,3 @@ mac:
   icon: build/mac/cansat.icns
   hardenedRuntime: false
   gatekeeperAssess: false
-
-artifactName: CanSat_Terminal-${version}-${os}-${arch}.${ext}

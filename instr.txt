@@ -22,4 +22,10 @@ sudo lsof /dev/$TTY 2>/dev/null
 journalctl -k -n 200 | egrep -i 'tty|usbserial|cp210|ch34|ftdi|acm'
 lsusb
 
+---WINDOWS---
+to build:
+npm run build:renderer
+npx electron-builder -c electron-builder.yml --win --x64 --publish=never
+
+
 

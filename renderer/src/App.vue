@@ -356,574 +356,493 @@
 </template>
 
 <script setup>
-import {
-  ref,
-  computed,
-  onMounted,
-  onBeforeUnmount,
-  watch,
-  nextTick,
-} from "vue";
-import { io } from "socket.io-client";
-import * as bootstrap from "bootstrap";
-import { getCurrentInstance } from "vue";
+  import {
+    ref,
+    computed,
+    onMounted,
+    onBeforeUnmount,
+    watch,
+    nextTick,
+  } from "vue";
+  import { io } from "socket.io-client";
+  import * as bootstrap from "bootstrap";
+  import { getCurrentInstance } from "vue";
 
-// Bootstrap Tooltip directive (local to this component)
-const bsTooltip = {
-  mounted(el, binding) {
-    if (el.hasAttribute("title")) el.removeAttribute("title"); // avoid native tooltip
-    el.__tip = new bootstrap.Tooltip(el, {
-      title: binding.value,
-      trigger: "hover",
-      container: "body", // <- render outside component tree
-      boundary: "window", // reduce reflow jitter
-      delay: { show: 100, hide: 100 },
-    });
-    el.__tipText = binding.value;
-  },
-  updated(el, binding) {
-    // Only touch the tooltip if the text actually changed
-    if (binding.value === binding.oldValue) return;
-    const tip = el.__tip;
-    if (!tip) return;
-    el.__tipText = binding.value;
-    if (typeof tip.setContent === "function") {
-      tip.setContent({ ".tooltip-inner": binding.value });
-    } else {
-      // fallback for older Bootstrap
-      tip.dispose();
+  // Bootstrap Tooltip directive (local to this component)
+  const bsTooltip = {
+    mounted(el, binding) {
+      if (el.hasAttribute("title")) el.removeAttribute("title"); // avoid native tooltip
       el.__tip = new bootstrap.Tooltip(el, {
         title: binding.value,
         trigger: "hover",
-        container: "body",
-        boundary: "window",
+        container: "body", // <- render outside component tree
+        boundary: "window", // reduce reflow jitter
         delay: { show: 100, hide: 100 },
       });
-    }
-  },
-  beforeUnmount(el) {
-    try {
-      el.__tip?.dispose();
-    } catch {}
-    delete el.__tip;
-  },
-};
-
-// register locally
-getCurrentInstance()?.appContext.app?.directive("bstooltip", bsTooltip);
-
-let tooltipInstances = [];
-const connBtn = ref(null);
-
-// ---------- socket ----------
-//const socket = io("http://127.0.0.1:17865");
-const socket = ref(null);
-
-// ---------- state ----------
-const ports = ref([]);
-const selectedPort = ref("");
-const busy = ref(false);
-const connected = ref(false);
-const status = ref("Desligado");
-// baud
-const baudRates = [
-  "2400",
-  "4800",
-  "9600",
-  "19200",
-  "28800",
-  "38400",
-  "56600",
-  "57600",
-  "76800",
-  "115200",
-];
-const selectedBaud = ref("9600");
-// log + scroll
-const log = ref([]);
-const rawlogEl = ref(null);
-const bottomSentinel = ref(null);
-// prefix toggles
-const showLineNo = ref(false);
-const showTime = ref(false);
-const showDate = ref(false);
-const includeAll = ref(false);
-const lineNo = ref(1);
-const skipNext = ref(true); // skip first line after (re)connect
-// theme
-const logDark = ref(true);
-const logColor = ref("#00ff66");
-const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
-const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
-// saving
-const saving = ref(false);
-const savingPaused = ref(false);
-const savingPath = ref("");
-const savingQueued = ref(0);
-const savingMsg = ref("Sem gravação de dados");
-// footer app info
-const appInfo = ref({ name: "CanSat Terminal", version: "1.0.0" });
-const author = "Duarte Cota";
-const year = new Date().getFullYear();
-//others
-const lastSavePath = ref(""); // remember last used file
-const autoResumeSaving = ref(true); // choose default behavior
-const DEFAULT_FONT = 14;
-const FONT_KEY = "logFontSize_v2"; // new versioned key
-const fontSize = ref(DEFAULT_FONT);
-const beepOn = ref(false);
-const lastBeepAt = ref(0);
-let audioCtx = null;
-
-// read (prefer v2; ignore bad/missing)
-const savedFsRaw = localStorage.getItem(FONT_KEY);
-if (savedFsRaw != null) {
-  const v = Number(savedFsRaw);
-  fontSize.value =
-    Number.isFinite(v) && v > 0 ? clamp(v, 10, 24) : DEFAULT_FONT;
-} else {
-}
-
-// ---------- helpers ----------
-function getAudioCtx() {
-  if (!audioCtx) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) audioCtx = new Ctx();
-  }
-  return audioCtx;
-}
-
-// Try to unlock / resume the AudioContext after a user gesture
-async function unlockAudio() {
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  try {
-    if (ctx.state !== "running") await ctx.resume();
-  } catch {}
-}
-
-// Attach one-time listeners to unlock on first interaction
-function initAudioUnlockOnce() {
-  const once = async () => {
-    await unlockAudio();
-    window.removeEventListener("pointerdown", once);
-    window.removeEventListener("keydown", once);
+      el.__tipText = binding.value;
+    },
+    updated(el, binding) {
+      // Only touch the tooltip if the text actually changed
+      if (binding.value === binding.oldValue) return;
+      const tip = el.__tip;
+      if (!tip) return;
+      el.__tipText = binding.value;
+      if (typeof tip.setContent === "function") {
+        tip.setContent({ ".tooltip-inner": binding.value });
+      } else {
+        // fallback for older Bootstrap
+        tip.dispose();
+        el.__tip = new bootstrap.Tooltip(el, {
+          title: binding.value,
+          trigger: "hover",
+          container: "body",
+          boundary: "window",
+          delay: { show: 100, hide: 100 },
+        });
+      }
+    },
+    beforeUnmount(el) {
+      try {
+        el.__tip?.dispose();
+      } catch {}
+      delete el.__tip;
+    },
   };
-  window.addEventListener("pointerdown", once, { once: true });
-  window.addEventListener("keydown", once, { once: true });
-}
 
-// Web-Audio fallback beep using the unlocked context
-function webBeep(durationMs = 40, freq = 880, gainVal = 0.05) {
-  const ctx = getAudioCtx();
-  if (!ctx || ctx.state !== "running") return; // can't play yet
-  try {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "square";
-    osc.frequency.value = freq;
-    gain.gain.value = gainVal;
-    osc.connect(gain).connect(ctx.destination);
-    const t0 = ctx.currentTime;
-    osc.start(t0);
-    osc.stop(t0 + durationMs / 1000);
-  } catch {}
-}
+  // register locally
+  getCurrentInstance()?.appContext.app?.directive("bstooltip", bsTooltip);
 
-async function playBeep() {
-  const now = Date.now();
-  if (now - lastBeepAt.value < 35) return; // rate-limit
-  lastBeepAt.value = now;
+  let tooltipInstances = [];
+  const connBtn = ref(null);
 
-  // 1) Try system beep
-  try {
-    await window.Beep?.play();
-  } catch {}
+  // ---------- socket ----------
+  //const socket = io("http://127.0.0.1:17865");
+  const socket = ref(null);
 
-  // 2) Ensure audio is unlocked, then Web-Audio fallback
-  await unlockAudio();
-  webBeep();
-}
+  // ---------- state ----------
+  const ports = ref([]);
+  const selectedPort = ref("");
+  const busy = ref(false);
+  const connected = ref(false);
+  const status = ref("Desligado");
+  // baud
+  const baudRates = [
+    "2400",
+    "4800",
+    "9600",
+    "19200",
+    "28800",
+    "38400",
+    "56600",
+    "57600",
+    "76800",
+    "115200",
+  ];
+  const selectedBaud = ref("9600");
+  // log + scroll
+  const log = ref([]);
+  const rawlogEl = ref(null);
+  const bottomSentinel = ref(null);
+  // prefix toggles
+  const showLineNo = ref(false);
+  const showTime = ref(false);
+  const showDate = ref(false);
+  const includeAll = ref(false);
+  const lineNo = ref(1);
+  const skipNext = ref(true); // skip first line after (re)connect
+  // theme
+  const logDark = ref(true);
+  const logColor = ref("#00ff66");
+  const logBg = computed(() => (logDark.value ? "#000" : "#fff"));
+  const logFg = computed(() => (logDark.value ? logColor.value : "#000"));
+  // saving
+  const saving = ref(false);
+  const savingPaused = ref(false);
+  const savingPath = ref("");
+  const savingQueued = ref(0);
+  const savingMsg = ref("Sem gravação de dados");
+  // footer app info
+  const appInfo = ref({ name: "CanSat Terminal", version: "1.0.0" });
+  const author = "Duarte Cota";
+  const year = new Date().getFullYear();
+  //others
+  const lastSavePath = ref(""); // remember last used file
+  const autoResumeSaving = ref(true); // choose default behavior
+  const DEFAULT_FONT = 14;
+  const FONT_KEY = "logFontSize_v2"; // new versioned key
+  const fontSize = ref(DEFAULT_FONT);
+  const beepOn = ref(false);
+  const lastBeepAt = ref(0);
+  let audioCtx = null;
 
-function handleWheelZoom(e) {
-  if (!(e.ctrlKey || e.metaKey)) return;
-  if (shouldIgnoreHotkeyTarget(e.target)) return;
-  e.preventDefault();
-  if (e.deltaY < 0) incFont();
-  else if (e.deltaY > 0) decFont();
-}
-
-function shouldIgnoreHotkeyTarget(target) {
-  if (!target) return false;
-  const tag = (target.tagName || "").toLowerCase();
-  const editable = target.isContentEditable;
-  return editable || tag === "input" || tag === "textarea" || tag === "select";
-}
-
-function handleFontHotkeys(e) {
-  // Require Ctrl/Cmd
-  if (!(e.ctrlKey || e.metaKey)) return;
-  if (shouldIgnoreHotkeyTarget(e.target)) return;
-
-  const k = e.key;
-
-  // Normalize: some keyboards send '+' only with Shift '=', some send 'Add'
-  const isPlus = k === "+" || k === "=" || k === "Add" || k === "NumpadAdd";
-  const isMinus = k === "-" || k === "Subtract" || k === "NumpadSubtract";
-  const isZero = k === "0" || k === "Numpad0";
-
-  if (isPlus) {
-    e.preventDefault();
-    incFont();
-    return;
-  }
-  if (isMinus) {
-    e.preventDefault();
-    decFont();
-    return;
-  }
-  if (isZero) {
-    e.preventDefault();
-    fontSize.value = clamp(DEFAULT_FONT, 10, 24);
-    return;
-  }
-}
-
-function clamp(n, min, max) {
-  return Math.min(max, Math.max(min, n));
-}
-
-function incFont() {
-  fontSize.value = clamp(fontSize.value + 1, 10, 24);
-}
-
-function decFont() {
-  fontSize.value = clamp(fontSize.value - 1, 10, 24);
-}
-
-async function startSaving() {
-  const res = await window.LogSaver?.start();
-  if (res?.started) {
-    saving.value = true;
-    savingPaused.value = false;
-    savingPath.value = res.filepath || "";
-    savingMsg.value = "A guardar...";
-    lastSavePath.value = savingPath.value;
+  // read (prefer v2; ignore bad/missing)
+  const savedFsRaw = localStorage.getItem(FONT_KEY);
+  if (savedFsRaw != null) {
+    const v = Number(savedFsRaw);
+    fontSize.value =
+      Number.isFinite(v) && v > 0 ? clamp(v, 10, 24) : DEFAULT_FONT;
   } else {
-    savingMsg.value = "Gravação cancelada";
-  }
-}
-function initTooltips() {
-  // dispose old
-  tooltipInstances.forEach((t) => {
-    try {
-      t.dispose();
-    } catch {}
-  });
-  tooltipInstances = [];
-  // init new
-  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
-    const tip = new bootstrap.Tooltip(el, { trigger: "hover" });
-    tooltipInstances.push(tip);
-  });
-}
-
-function hideAllTooltips() {
-  tooltipInstances.forEach((t) => {
-    try {
-      t.hide();
-    } catch {}
-  });
-}
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-function pad3(n) {
-  return String(n).padStart(3, "0");
-}
-
-function makePrefix() {
-  const cols = [];
-  const now = new Date();
-
-  // line number (keep the # — remove it if you want pure numeric)
-  if (includeAll.value || showLineNo.value) cols.push(String(lineNo.value++)); // no '#'
-
-  // time (HH:MM:SS.mmm)
-  if (includeAll.value || showTime.value) {
-    cols.push(
-      `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
-        now.getSeconds()
-      )}.${pad3(now.getMilliseconds())}`
-    );
   }
 
-  // date (YYYY-MM-DD)
-  if (includeAll.value || showDate.value) {
-    cols.push(
-      `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
-    );
-  }
-
-  // join with ';' and terminate with '; '
-  return cols.length ? cols.join(";") + ";" : "";
-}
-
-function addLineRaw(s) {
-  if (skipNext.value) {
-    skipNext.value = false;
-    return;
-  }
-
-  // coerce & ignore empty/whitespace-only lines
-  const str = typeof s === "string" ? s : String(s ?? "");
-  if (!str.trim()) return;
-
-  // tidy only the end (remove trailing \r/\n/spaces), keep inner spacing
-  const cleaned = str.trimEnd();
-
-  const box = rawlogEl.value;
-  const shouldStick =
-    !box ||
-    box.scrollHeight <= box.clientHeight ||
-    box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
-
-  const line = makePrefix() + cleaned;
-
-  log.value.push(line);
-  if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
-
-  if (beepOn.value) playBeep();
-
-  nextTick(() => {
-    if (shouldStick && bottomSentinel.value) {
-      requestAnimationFrame(() =>
-        bottomSentinel.value.scrollIntoView({ block: "end" })
-      );
+  // ---------- helpers ----------
+  function getAudioCtx() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) audioCtx = new Ctx();
     }
-  });
-
-  // append to saver only for non-empty lines
-  if (saving.value && !savingPaused.value && window.LogSaver) {
-    window.LogSaver.append(line)
-      .then((res) => {
-        if (res?.queued != null) savingQueued.value = res.queued;
-      })
-      .catch(() => {
-        savingMsg.value = "Erro ao gravar";
-      });
+    return audioCtx;
   }
-}
 
-async function clearLog() {
-  log.value = [];
-  lineNo.value = 1;
-  nextTick(() => {
-    const el = rawlogEl.value;
-    if (el) el.scrollTop = 0;
-  });
-  await nextTick();
-  hideAllTooltips();
-  await nextTick();
-  initTooltips();
-}
-
-async function updateSavingStatus(s) {
-  if (!s) return;
-  saving.value = !!s.active;
-  savingPaused.value = !!s.paused;
-  savingPath.value = s.filepath || "";
-  savingQueued.value = Number(s.queued || 0);
-  savingMsg.value = saving.value
-    ? savingPaused.value
-      ? "Pausado"
-      : "A guardar..."
-    : "Sem gravação de dados";
-}
-
-// ---------- actions ----------
-function getPorts() {
-  if (!socket.value || !socket.value.connected) {
-    status.value = "A iniciar ligação interna...";
-    return;
+  // Try to unlock / resume the AudioContext after a user gesture
+  async function unlockAudio() {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    try {
+      if (ctx.state !== "running") await ctx.resume();
+    } catch {}
   }
-  socket.value.emit("getcoms"); // <- use socket.value
-}
 
-async function connect() {
-  if (!selectedPort.value) return;
-  skipNext.value = true;
-  socket.value.emit("conn", {
-    // <- use socket.value
-    port: selectedPort.value,
-    baudRate: Number(selectedBaud.value),
-  });
-  connected.value = true;
-  status.value = `Ligado a ${selectedPort.value} @ ${selectedBaud.value} bps`;
-  // auto-resume saving into the same file (optional)
-  if (autoResumeSaving.value && lastSavePath.value && window.LogSaver) {
-    const res = await window.LogSaver.startPath(lastSavePath.value);
+  // Attach one-time listeners to unlock on first interaction
+  function initAudioUnlockOnce() {
+    const once = async () => {
+      await unlockAudio();
+      window.removeEventListener("pointerdown", once);
+      window.removeEventListener("keydown", once);
+    };
+    window.addEventListener("pointerdown", once, { once: true });
+    window.addEventListener("keydown", once, { once: true });
+  }
+
+  // Web-Audio fallback beep using the unlocked context
+  function webBeep(durationMs = 40, freq = 880, gainVal = 0.05) {
+    const ctx = getAudioCtx();
+    if (!ctx || ctx.state !== "running") return; // can't play yet
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = freq;
+      gain.gain.value = gainVal;
+      osc.connect(gain).connect(ctx.destination);
+      const t0 = ctx.currentTime;
+      osc.start(t0);
+      osc.stop(t0 + durationMs / 1000);
+    } catch {}
+  }
+
+  async function playBeep() {
+    const now = Date.now();
+    if (now - lastBeepAt.value < 35) return; // rate-limit
+    lastBeepAt.value = now;
+
+    // 1) Try system beep
+    try {
+      await window.Beep?.play();
+    } catch {}
+
+    // 2) Ensure audio is unlocked, then Web-Audio fallback
+    await unlockAudio();
+    webBeep();
+  }
+
+  function handleWheelZoom(e) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (shouldIgnoreHotkeyTarget(e.target)) return;
+    e.preventDefault();
+    if (e.deltaY < 0) incFont();
+    else if (e.deltaY > 0) decFont();
+  }
+
+  function shouldIgnoreHotkeyTarget(target) {
+    if (!target) return false;
+    const tag = (target.tagName || "").toLowerCase();
+    const editable = target.isContentEditable;
+    return editable || tag === "input" || tag === "textarea" || tag === "select";
+  }
+
+  function handleFontHotkeys(e) {
+    // Require Ctrl/Cmd
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (shouldIgnoreHotkeyTarget(e.target)) return;
+
+    const k = e.key;
+
+    // Normalize: some keyboards send '+' only with Shift '=', some send 'Add'
+    const isPlus = k === "+" || k === "=" || k === "Add" || k === "NumpadAdd";
+    const isMinus = k === "-" || k === "Subtract" || k === "NumpadSubtract";
+    const isZero = k === "0" || k === "Numpad0";
+
+    if (isPlus) {
+      e.preventDefault();
+      incFont();
+      return;
+    }
+    if (isMinus) {
+      e.preventDefault();
+      decFont();
+      return;
+    }
+    if (isZero) {
+      e.preventDefault();
+      fontSize.value = clamp(DEFAULT_FONT, 10, 24);
+      return;
+    }
+  }
+
+  function clamp(n, min, max) {
+    return Math.min(max, Math.max(min, n));
+  }
+
+  function incFont() {
+    fontSize.value = clamp(fontSize.value + 1, 10, 24);
+  }
+
+  function decFont() {
+    fontSize.value = clamp(fontSize.value - 1, 10, 24);
+  }
+
+  async function startSaving() {
+    const res = await window.LogSaver?.start();
     if (res?.started) {
       saving.value = true;
       savingPaused.value = false;
-      savingPath.value = res.filepath;
+      savingPath.value = res.filepath || "";
       savingMsg.value = "A guardar...";
+      lastSavePath.value = savingPath.value;
+    } else {
+      savingMsg.value = "Gravação cancelada";
     }
   }
-  hideAllTooltips();
-  await nextTick();
-  initTooltips();
-}
-
-async function disconnect() {
-  socket.value?.emit("disconn");
-  connected.value = false;
-  status.value = "Desligado";
-  // ⛔ force-stop saving
-  if (window.LogSaver) {
-    try {
-      await window.LogSaver.stop();
-    } catch {}
+  function initTooltips() {
+    // dispose old
+    tooltipInstances.forEach((t) => {
+      try {
+        t.dispose();
+      } catch {}
+    });
+    tooltipInstances = [];
+    // init new
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((el) => {
+      const tip = new bootstrap.Tooltip(el, { trigger: "hover" });
+      tooltipInstances.push(tip);
+    });
   }
-  saving.value = false;
-  savingPaused.value = false;
-  savingMsg.value = "Terminado";
-  // ✅ unset all extra data options immediately
-  includeAll.value = false;
-  showLineNo.value = false;
-  showTime.value = false;
-  showDate.value = false;
 
-  // (optional) reset line counter if you want numbering to restart next time:
-  // lineNo.value = 1
-
-  // persist the state so it sticks
-  localStorage.setItem(
-    "rawlog_opts",
-    JSON.stringify({
-      showLineNo: showLineNo.value,
-      showTime: showTime.value,
-      showDate: showDate.value,
-      includeAll: includeAll.value,
-    })
-  );
-  hideAllTooltips();
-  await nextTick();
-  initTooltips();
-}
-
-async function pauseSaving() {
-  if (window.LogSaver) {
-    await window.LogSaver.pause();
-    savingPaused.value = true;
-    savingMsg.value = "Pausado";
+  function hideAllTooltips() {
+    tooltipInstances.forEach((t) => {
+      try {
+        t.hide();
+      } catch {}
+    });
   }
-  await nextTick();
-  initTooltips();
-}
-async function resumeSaving() {
-  if (window.LogSaver) {
-    await window.LogSaver.resume();
+
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+  function pad3(n) {
+    return String(n).padStart(3, "0");
+  }
+
+  function makePrefix() {
+    const cols = [];
+    const now = new Date();
+
+    // line number (keep the # — remove it if you want pure numeric)
+    if (includeAll.value || showLineNo.value) cols.push(String(lineNo.value++)); // no '#'
+
+    // time (HH:MM:SS.mmm)
+    if (includeAll.value || showTime.value) {
+      cols.push(
+        `${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(
+          now.getSeconds()
+        )}.${pad3(now.getMilliseconds())}`
+      );
+    }
+
+    // date (YYYY-MM-DD)
+    if (includeAll.value || showDate.value) {
+      cols.push(
+        `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+      );
+    }
+
+    // join with ';' and terminate with '; '
+    return cols.length ? cols.join(";") + ";" : "";
+  }
+
+  function addLineRaw(s) {
+    if (skipNext.value) {
+      skipNext.value = false;
+      return;
+    }
+
+    // coerce & ignore empty/whitespace-only lines
+    const str = typeof s === "string" ? s : String(s ?? "");
+    if (!str.trim()) return;
+
+    // tidy only the end (remove trailing \r/\n/spaces), keep inner spacing
+    const cleaned = str.trimEnd();
+
+    const box = rawlogEl.value;
+    const shouldStick =
+      !box ||
+      box.scrollHeight <= box.clientHeight ||
+      box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
+
+    const line = makePrefix() + cleaned;
+
+    log.value.push(line);
+    if (log.value.length > 5000) log.value.splice(0, log.value.length - 5000);
+
+    if (beepOn.value) playBeep();
+
+    nextTick(() => {
+      if (shouldStick && bottomSentinel.value) {
+        requestAnimationFrame(() =>
+          bottomSentinel.value.scrollIntoView({ block: "end" })
+        );
+      }
+    });
+
+    // append to saver only for non-empty lines
+    if (saving.value && !savingPaused.value && window.LogSaver) {
+      window.LogSaver.append(line)
+        .then((res) => {
+          if (res?.queued != null) savingQueued.value = res.queued;
+        })
+        .catch(() => {
+          savingMsg.value = "Erro ao gravar";
+        });
+    }
+  }
+
+  async function clearLog() {
+    log.value = [];
+    lineNo.value = 1;
+    nextTick(() => {
+      const el = rawlogEl.value;
+      if (el) el.scrollTop = 0;
+    });
+    await nextTick();
+    hideAllTooltips();
+    await nextTick();
+    initTooltips();
+  }
+
+  async function updateSavingStatus(s) {
+    if (!s) return;
+    saving.value = !!s.active;
+    savingPaused.value = !!s.paused;
+    savingPath.value = s.filepath || "";
+    savingQueued.value = Number(s.queued || 0);
+    savingMsg.value = saving.value
+      ? savingPaused.value
+        ? "Pausado"
+        : "A guardar..."
+      : "Sem gravação de dados";
+  }
+
+  // ---------- actions ----------
+  function getPorts() {
+    if (!socket.value || !socket.value.connected) {
+      status.value = "A iniciar ligação interna...";
+      return;
+    }
+    socket.value.emit("getcoms"); // <- use socket.value
+  }
+
+  async function connect() {
+    if (!selectedPort.value) return;
+    skipNext.value = true;
+    socket.value.emit("conn", {
+      // <- use socket.value
+      port: selectedPort.value,
+      baudRate: Number(selectedBaud.value),
+    });
+    connected.value = true;
+    status.value = `Ligado a ${selectedPort.value} @ ${selectedBaud.value} bps`;
+    // auto-resume saving into the same file (optional)
+    if (autoResumeSaving.value && lastSavePath.value && window.LogSaver) {
+      const res = await window.LogSaver.startPath(lastSavePath.value);
+      if (res?.started) {
+        saving.value = true;
+        savingPaused.value = false;
+        savingPath.value = res.filepath;
+        savingMsg.value = "A guardar...";
+      }
+    }
+    hideAllTooltips();
+    await nextTick();
+    initTooltips();
+  }
+
+  async function disconnect() {
+    socket.value?.emit("disconn");
+    connected.value = false;
+    status.value = "Desligado";
+    // ⛔ force-stop saving
+    if (window.LogSaver) {
+      try {
+        await window.LogSaver.stop();
+      } catch {}
+    }
+    saving.value = false;
     savingPaused.value = false;
-    savingMsg.value = "A guardar...";
-  }
-  await nextTick();
-  initTooltips();
-}
-async function stopSaving() {
-  await window.LogSaver?.stop();
-  saving.value = false;
-  savingPaused.value = false;
-  savingMsg.value = "Terminado";
-  await nextTick();
-  initTooltips();
-}
-
-function setupSocket(port) {
-  if (!port) return;
-  if (socket.value) return; // already connected/created
-  socket.value = io(`http://127.0.0.1:${port}`);
-
-  socket.value.on("connect", () => {
-    // now safe to request ports automatically
-    socket.value.emit("getcoms");
-  });
-
-  socket.value.on("coms", (list) => {
-    ports.value = list || [];
-    if (!selectedPort.value && ports.value.length)
-      selectedPort.value = ports.value[0];
-    busy.value = false;
-  });
-
-  socket.value.on("errors", (m) => {
-    status.value = "Erro: " + (m || "");
-    busy.value = false;
-  });
-
-  socket.value.on("porterror", (m) => {
-    status.value = "Porta: " + (m || "");
-  });
-
-  socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
-}
-
-// ---------- watchers----------
-watch(fontSize, (v) => {
-  localStorage.setItem(FONT_KEY, String(clamp(v, 10, 24)));
-});
-
-watch(includeAll, (v) => {
-  if (v) {
+    savingMsg.value = "Terminado";
+    // ✅ unset all extra data options immediately
+    includeAll.value = false;
     showLineNo.value = false;
     showTime.value = false;
     showDate.value = false;
+
+    // (optional) reset line counter if you want numbering to restart next time:
+    // lineNo.value = 1
+
+    // persist the state so it sticks
+    localStorage.setItem(
+      "rawlog_opts",
+      JSON.stringify({
+        showLineNo: showLineNo.value,
+        showTime: showTime.value,
+        showDate: showDate.value,
+        includeAll: includeAll.value,
+      })
+    );
+    hideAllTooltips();
+    await nextTick();
+    initTooltips();
   }
-});
 
-watch(selectedBaud, (v) => localStorage.setItem("baudRate", v));
-
-watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
-
-watch(logColor, (v) => localStorage.setItem("logColor", v));
-
-watch(connected, async () => {
-  await nextTick();
-  const el = connBtn.value;
-  if (!el) return;
-  // If your Bootstrap version supports setContent (v5.2+), use it:
-  const tip = bootstrap.Tooltip.getInstance(el);
-  if (tip && tip.setContent) {
-    tip.setContent({
-      ".tooltip-inner": connected.value ? "Desligar" : "Ligar",
-    });
-  } else {
-    // fallback: dispose & recreate
-    if (tip) tip.dispose();
-    new bootstrap.Tooltip(el, { trigger: "hover" });
+  async function pauseSaving() {
+    if (window.LogSaver) {
+      await window.LogSaver.pause();
+      savingPaused.value = true;
+      savingMsg.value = "Pausado";
+    }
+    await nextTick();
+    initTooltips();
   }
-});
+  async function resumeSaving() {
+    if (window.LogSaver) {
+      await window.LogSaver.resume();
+      savingPaused.value = false;
+      savingMsg.value = "A guardar...";
+    }
+    await nextTick();
+    initTooltips();
+  }
+  async function stopSaving() {
+    await window.LogSaver?.stop();
+    saving.value = false;
+    savingPaused.value = false;
+    savingMsg.value = "Terminado";
+    await nextTick();
+    initTooltips();
+  }
 
-watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
-
-watch(beepOn, async (v) => {
-  localStorage.setItem("beepOn", String(v));
-  if (v) await unlockAudio(); // flipping on is a good moment to unlock
-});
-
-watch([saving, savingPaused], async () => {
-  await nextTick();
-  initTooltips();
-});
-
-//init
-onMounted(async () => {
-  const p = await window.SIO?.getPort?.();
-  if (p) setupSocket(p);
-  window.SIO?.onPort((port) => {
-    console.log("SIO port from main:", port);
-    if (socket.value) return;
+  function setupSocket(port) {
+    if (!port) return;
+    if (socket.value) return; // already connected/created
     socket.value = io(`http://127.0.0.1:${port}`);
 
     socket.value.on("connect", () => {
@@ -931,104 +850,210 @@ onMounted(async () => {
       socket.value.emit("getcoms");
     });
 
-    // reattach your existing handlers here:
     socket.value.on("coms", (list) => {
       ports.value = list || [];
       if (!selectedPort.value && ports.value.length)
         selectedPort.value = ports.value[0];
       busy.value = false;
     });
+
     socket.value.on("errors", (m) => {
       status.value = "Erro: " + (m || "");
       busy.value = false;
     });
+
     socket.value.on("porterror", (m) => {
       status.value = "Porta: " + (m || "");
     });
 
     socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
+  }
+  function playHtmlBeep() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-    // kick off initial ports fetch if you did that before
-    socket.value.emit("getcoms");
+    // gentler waveform
+    osc.type = "sine";
+    osc.frequency.value = 900; // 700–1000 is nice for alerts
 
-    //const savedBeep = localStorage.getItem("beepOn");
-    //if (savedBeep != null) beepOn.value = savedBeep === "true";
+    const now = ctx.currentTime;
+    const duration = 0.22;
+
+    // start quiet → up fast → down smooth
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.01); // quick attack
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration); // smooth tail
+
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  // ---------- watchers----------
+  watch(fontSize, (v) => {
+    localStorage.setItem(FONT_KEY, String(clamp(v, 10, 24)));
   });
 
-  const savedFsRaw = localStorage.getItem("logFontSize");
-  if (savedFsRaw !== null) {
-    const v = Number(savedFsRaw);
-    if (Number.isFinite(v) && v > 0) {
-      fontSize.value = clamp(v, 10, 24);
+  watch(includeAll, (v) => {
+    if (v) {
+      showLineNo.value = false;
+      showTime.value = false;
+      showDate.value = false;
     }
-  } else {
-    fontSize.value = DEFAULT_FONT;
-  }
-  window.addEventListener("keydown", handleFontHotkeys, { passive: false });
-  window.addEventListener("wheel", handleWheelZoom, { passive: false });
-  // init tooltips
-  await nextTick();
-  if (connBtn.value) {
-    new bootstrap.Tooltip(connBtn.value, { trigger: "hover" });
-  }
-  initTooltips();
-
-  // restore prefs
-  const savedDark = localStorage.getItem("logDark");
-  if (savedDark !== null) logDark.value = savedDark === "true";
-  const savedColor = localStorage.getItem("logColor");
-  if (savedColor !== null) logColor.value = savedColor;
-  const savedBaud = localStorage.getItem("baudRate");
-  if (savedBaud && baudRates.includes(savedBaud))
-    selectedBaud.value = savedBaud;
-
-  // never auto-check "Todos" on startup
-  includeAll.value = false;
-
-  // saver callbacks
-  if (window.LogSaver) {
-    window.LogSaver.onStatus(updateSavingStatus);
-    window.LogSaver.onError((m) => {
-      savingMsg.value = "Erro: " + m;
-    });
-    window.LogSaver.status();
-  }
-
-  // app info for footer (from preload)
-  if (window.AppInfo && typeof window.AppInfo.get === "function") {
-    try {
-      const info = await window.AppInfo.get();
-      if (info)
-        appInfo.value = {
-          name: info.name || appInfo.value.name,
-          version: info.version || appInfo.value.version,
-        };
-    } catch {}
-  }
-
-  // read saved
-  const savedBeep = localStorage.getItem("beepOn");
-  if (savedBeep != null) beepOn.value = savedBeep === "true";
-
-  // prepare unlock on first gesture
-  initAudioUnlockOnce();
-
-  // also try to unlock when window re-focuses
-  window.addEventListener("focus", unlockAudio);
-
-  // scroll listener (optional UI like "jump to bottom"); core stickiness is handled per-append
-  nextTick(() => {
-    rawlogEl.value?.addEventListener("scroll", () => {}, { passive: true });
   });
-});
 
-onBeforeUnmount(() => {
-  rawlogEl.value?.removeEventListener("scroll", () => {});
-  window.removeEventListener("keydown", handleFontHotkeys);
-  window.removeEventListener("keydown", handleFontHotkeys);
-  socket.value?.close();
-  window.removeEventListener("focus", unlockAudio);
-});
+  watch(selectedBaud, (v) => localStorage.setItem("baudRate", v));
+
+  watch(logDark, (v) => localStorage.setItem("logDark", String(v)));
+
+  watch(logColor, (v) => localStorage.setItem("logColor", v));
+
+  watch(connected, async () => {
+    await nextTick();
+    const el = connBtn.value;
+    if (!el) return;
+    // If your Bootstrap version supports setContent (v5.2+), use it:
+    const tip = bootstrap.Tooltip.getInstance(el);
+    if (tip && tip.setContent) {
+      tip.setContent({
+        ".tooltip-inner": connected.value ? "Desligar" : "Ligar",
+      });
+    } else {
+      // fallback: dispose & recreate
+      if (tip) tip.dispose();
+      new bootstrap.Tooltip(el, { trigger: "hover" });
+    }
+  });
+
+  watch(fontSize, (v) => localStorage.setItem("logFontSize", String(v)));
+
+  watch(beepOn, async (v) => {
+    localStorage.setItem("beepOn", String(v));
+    if (v) await unlockAudio(); // flipping on is a good moment to unlock
+  });
+
+  watch([saving, savingPaused], async () => {
+    await nextTick();
+    initTooltips();
+  });
+
+  //init
+  onMounted(async () => {
+    const p = await window.SIO?.getPort?.();
+    if (p) setupSocket(p);
+    window.SIO?.onPort((port) => {
+      console.log("SIO port from main:", port);
+      if (socket.value) return;
+      socket.value = io(`http://127.0.0.1:${port}`);
+
+      socket.value.on("connect", () => {
+        // now safe to request ports automatically
+        socket.value.emit("getcoms");
+      });
+
+      // reattach your existing handlers here:
+      socket.value.on("coms", (list) => {
+        ports.value = list || [];
+        if (!selectedPort.value && ports.value.length)
+          selectedPort.value = ports.value[0];
+        busy.value = false;
+      });
+      socket.value.on("errors", (m) => {
+        status.value = "Erro: " + (m || "");
+        busy.value = false;
+      });
+      socket.value.on("porterror", (m) => {
+        status.value = "Porta: " + (m || "");
+      });
+
+      socket.value.on("data", (text) => addLineRaw(String(text ?? "")));
+
+      // kick off initial ports fetch if you did that before
+      socket.value.emit("getcoms");
+
+      //const savedBeep = localStorage.getItem("beepOn");
+      //if (savedBeep != null) beepOn.value = savedBeep === "true";
+    });
+
+    const savedFsRaw = localStorage.getItem("logFontSize");
+    if (savedFsRaw !== null) {
+      const v = Number(savedFsRaw);
+      if (Number.isFinite(v) && v > 0) {
+        fontSize.value = clamp(v, 10, 24);
+      }
+    } else {
+      fontSize.value = DEFAULT_FONT;
+    }
+    window.addEventListener("keydown", handleFontHotkeys, { passive: false });
+    window.addEventListener("wheel", handleWheelZoom, { passive: false });
+    // init tooltips
+    await nextTick();
+    if (connBtn.value) {
+      new bootstrap.Tooltip(connBtn.value, { trigger: "hover" });
+    }
+    initTooltips();
+
+    // restore prefs
+    const savedDark = localStorage.getItem("logDark");
+    if (savedDark !== null) logDark.value = savedDark === "true";
+    const savedColor = localStorage.getItem("logColor");
+    if (savedColor !== null) logColor.value = savedColor;
+    const savedBaud = localStorage.getItem("baudRate");
+    if (savedBaud && baudRates.includes(savedBaud))
+      selectedBaud.value = savedBaud;
+
+    // never auto-check "Todos" on startup
+    includeAll.value = false;
+
+    // saver callbacks
+    if (window.LogSaver) {
+      window.LogSaver.onStatus(updateSavingStatus);
+      window.LogSaver.onError((m) => {
+        savingMsg.value = "Erro: " + m;
+      });
+      window.LogSaver.status();
+    }
+
+    // app info for footer (from preload)
+    if (window.AppInfo && typeof window.AppInfo.get === "function") {
+      try {
+        const info = await window.AppInfo.get();
+        if (info)
+          appInfo.value = {
+            name: info.name || appInfo.value.name,
+            version: info.version || appInfo.value.version,
+          };
+      } catch {}
+    }
+    if (window.Beep && typeof window.Beep.onHtml5 === "function") {
+      window.Beep.onHtml5(() => {
+        playHtmlBeep();
+      });
+    }
+    // read saved
+    const savedBeep = localStorage.getItem("beepOn");
+    if (savedBeep != null) beepOn.value = savedBeep === "true";
+
+    // prepare unlock on first gesture
+    initAudioUnlockOnce();
+
+    // also try to unlock when window re-focuses
+    window.addEventListener("focus", unlockAudio);
+
+    // scroll listener (optional UI like "jump to bottom"); core stickiness is handled per-append
+    nextTick(() => {
+      rawlogEl.value?.addEventListener("scroll", () => {}, { passive: true });
+    });
+  });
+
+  onBeforeUnmount(() => {
+    rawlogEl.value?.removeEventListener("scroll", () => {});
+    window.removeEventListener("keydown", handleFontHotkeys);
+    window.removeEventListener("keydown", handleFontHotkeys);
+    socket.value?.close();
+    window.removeEventListener("focus", unlockAudio);
+  });
 </script>
 
 <style>
