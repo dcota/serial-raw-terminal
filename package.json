@@ -17,7 +17,12 @@
     "dist:linux": "npm run build:renderer && electron-builder -c electron-builder.yml --linux --publish=never",
     "dist:linux:rpm": "npm run build:renderer && electron-builder -c electron-builder.yml --linux AppImage deb rpm --publish=never",
     "dist:win": "npm run build:renderer && electron-builder -c electron-builder.yml --win --x64 --publish=never",
-    "dist:win:ia32": "npm run build:renderer && electron-builder -c electron-builder.yml --win --ia32 --publish=never"
+    "dist:win:ia32": "npm run build:renderer && electron-builder -c electron-builder.yml --win --ia32 --publish=never",
+    "pack:mac": "npm run build:renderer && electron-builder --mac --dir",
+    "dist:mac": "npm run build:renderer && electron-builder --mac dmg zip",
+    "dist:mac:arm64": "npm run build:renderer && electron-builder --mac=arm64 dmg zip",
+    "dist:mac:x64": "npm run build:renderer && electron-builder --mac=x64 dmg zip",
+    "dist:mac:universal": "npm run build:renderer && electron-builder --mac universal"
   },
   "build": {
     "appId": "com.yourorg.serialrawterminal",
