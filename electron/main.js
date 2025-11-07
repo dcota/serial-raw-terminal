@@ -384,10 +384,7 @@ function ensureSocketServer(win) {
     return { ok: true };
   });
 
-  ipcMain.handle("beep:play", (e) => {
-  // on Windows the native beep can sound doubled, so let the renderer do it
-  if (process.platform === "win32") {
-    // tell the renderer to play its own beep
+  ipcMain.handle("beep:play", () => {
     const wins = BrowserWindow.getAllWindows();
     for (const w of wins) {
       try {
@@ -395,15 +392,7 @@ function ensureSocketServer(win) {
       } catch {}
     }
     return true;
-  }
-
-  // on macOS / Linux keep the native beep
-  try {
-    shell.beep();
-  } catch {}
-  return true;
-});
-
+  });
 }
 
 // ---- Line-by-line saver (one active session) ----
